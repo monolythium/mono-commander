@@ -160,7 +160,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Update failed: %v", msg.err)
 		} else if msg.result != nil {
 			if msg.result.Success {
-				m.status = fmt.Sprintf("Updated to %s. Please restart monoctl.", msg.result.NewVersion)
+				if msg.result.NewVersion != "" {
+					m.status = fmt.Sprintf("Updated to %s. Please restart monoctl.", msg.result.NewVersion)
+				} else {
+					m.status = "Update installed. Please restart monoctl."
+				}
 				m.err = nil
 			} else {
 				m.status = fmt.Sprintf("Update failed: %s", msg.result.Error)

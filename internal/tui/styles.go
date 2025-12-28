@@ -123,24 +123,19 @@ var (
 	TextInfo = lipgloss.NewStyle().Foreground(ColorInfo)
 )
 
-// Tab bar styles - premium outlined design
+// Tab bar styles - clean inline design
 var (
-	// Inactive tab: simple text
+	// Inactive tab: simple muted text
 	TabInactive = lipgloss.NewStyle().
 			Padding(0, 2).
 			Foreground(ColorMuted)
 
-	// Active tab: outlined box with accent border
+	// Active tab: bright text with underline indicator
 	TabActive = lipgloss.NewStyle().
 			Padding(0, 2).
 			Bold(true).
-			Foreground(ColorBright).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBrand).
-			BorderTop(true).
-			BorderBottom(true).
-			BorderLeft(true).
-			BorderRight(true)
+			Foreground(ColorBrand).
+			Underline(true)
 
 	// Tab bar container
 	TabBarContainer = lipgloss.NewStyle().
