@@ -2,11 +2,59 @@
 
 A TUI-first command-line tool for installing and operating Monolythium nodes across networks.
 
+## Quick Start
+
+### Prerequisites
+
+**Go 1.23+** is required. If you don't have Go installed:
+
+```bash
+# macOS (Homebrew)
+brew install go
+
+# Ubuntu/Debian
+sudo apt update && sudo apt install -y golang-go
+
+# Or download from https://go.dev/dl/
+```
+
+Verify installation:
+```bash
+go version
+# Should show: go version go1.23.x ...
+```
+
+### Install Mono Commander
+
+**Option 1: One-liner install (recommended)**
+```bash
+go install github.com/monolythium/mono-commander/cmd/monoctl@latest
+```
+
+**Option 2: Build from source**
+```bash
+git clone https://github.com/monolythium/mono-commander.git
+cd mono-commander
+go build -o monoctl ./cmd/monoctl
+sudo mv monoctl /usr/local/bin/  # Optional: add to PATH
+```
+
+### Launch the TUI
+
+```bash
+monoctl
+```
+
+That's it! The interactive TUI will guide you through node setup.
+
 ## Features
 
-- **TUI-first**: Interactive terminal UI with keyboard navigation
+- **Premium TUI**: Interactive terminal UI with gradient borders, dark theme, mouse support
 - **CLI mode**: Non-interactive commands for CI/automation
 - **Multi-network**: Support for Localnet, Sprintnet, Testnet, and Mainnet
+- **Self-updating**: Auto-update from GitHub Releases with checksum verification
+- **Health monitoring**: Real-time node status, RPC checks, validator health
+- **Log streaming**: Live log viewing with filtering
 - **Dry-run support**: Preview changes before applying them
 - **Systemd integration**: Generate systemd unit files (with optional Cosmovisor)
 
@@ -19,40 +67,29 @@ A TUI-first command-line tool for installing and operating Monolythium nodes acr
 | Testnet    | mono-test-1    | 262147       | 0x40003  |
 | Mainnet    | mono-1         | 262148       | 0x40004  |
 
-## Installation
+## TUI Navigation
 
-```bash
-go install github.com/monolythium/mono-commander/cmd/monoctl@latest
-```
+| Key | Action |
+|-----|--------|
+| `Tab` / `←` `→` | Switch tabs |
+| `Enter` | Select / Confirm |
+| `Esc` | Go back / Cancel |
+| `r` | Refresh current view |
+| `n` | Change network (Dashboard) |
+| `q` | Quit |
 
-Or build from source:
+**Mouse support**: Click tabs to switch, scroll wheel for viewports.
 
-```bash
-git clone https://github.com/monolythium/mono-commander.git
-cd mono-commander
-go build -o monoctl ./cmd/monoctl
-```
+## CLI Commands
 
-## Usage
-
-### Interactive TUI
-
-Launch the interactive terminal UI:
-
-```bash
-monoctl
-```
-
-### CLI Commands
-
-#### List Networks
+### List Networks
 
 ```bash
 monoctl networks list
 monoctl networks list --json
 ```
 
-#### Join a Network
+### Join a Network
 
 Download genesis and configure peers for a network:
 
@@ -67,7 +104,7 @@ monoctl join \
   --genesis-sha256 <expected-sha256>
 ```
 
-#### Update Peers
+### Update Peers
 
 Update peer list from the network registry:
 
@@ -75,7 +112,7 @@ Update peer list from the network registry:
 monoctl peers update --network Sprintnet --home ~/.monod --dry-run
 ```
 
-#### Install Systemd Service
+### Install Systemd Service
 
 Generate a systemd unit file:
 
@@ -94,6 +131,20 @@ monoctl systemd install \
   --user monod \
   --cosmovisor \
   --dry-run
+```
+
+### Node Status
+
+```bash
+monoctl status --network Sprintnet
+monoctl status --network Sprintnet --json
+```
+
+### Health Checks
+
+```bash
+monoctl health --network Sprintnet
+monoctl health --network Sprintnet --json
 ```
 
 ### Mesh/Rosetta API Sidecar
@@ -213,6 +264,18 @@ In the interactive TUI, navigate to the **Update** tab and press `u` to apply an
 - **Systemd-first**: Node operation uses systemd/cosmovisor (no Docker runtime)
 - **User confirmation required**: Systemd service is not auto-enabled
 
+## Terminal Requirements
+
+For the best experience:
+- **Truecolor terminal** (iTerm2, Alacritty, Kitty, Windows Terminal) for gradient borders
+- Falls back gracefully to 256-color mode
+
+To verify truecolor support:
+```bash
+echo $COLORTERM
+# Should show: truecolor or 24bit
+```
+
 ## Architecture
 
 ```
@@ -225,8 +288,8 @@ mono-commander/
 │   ├── net/              # HTTP fetcher
 │   ├── mesh/             # Mesh/Rosetta API sidecar management
 │   ├── update/           # Self-update (GitHub releases, checksums, safe swap)
-│   ├── rpc/              # RPC helpers (future)
-│   └── logs/             # Log helpers
+│   ├── rpc/              # RPC helpers (Comet, Cosmos, EVM)
+│   └── logs/             # Log streaming helpers
 └── testdata/             # Test fixtures
 ```
 
@@ -243,6 +306,30 @@ go test ./...
 ```bash
 go build -o monoctl ./cmd/monoctl
 ```
+
+### Build with Version
+
+```bash
+go build -ldflags "-X github.com/monolythium/mono-commander/internal/tui.Version=v1.0.0" -o monoctl ./cmd/monoctl
+```
+
+## Troubleshooting
+
+**RPC unreachable?**
+- Check if the node is running: `systemctl status monod`
+- Verify the node is listening on expected ports
+
+**Wrong chain-id?**
+- Ensure you're connected to the correct network
+- Check genesis.json matches the expected network
+
+**Ports in use?**
+- Stop conflicting services: `lsof -i :26657`
+- Use different ports in config.toml
+
+**Systemd not present?**
+- Systemd is required for service management on Linux
+- On macOS, use launchd or run manually
 
 ## License
 
