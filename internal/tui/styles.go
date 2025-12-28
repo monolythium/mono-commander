@@ -21,6 +21,11 @@ func detectTrueColor() bool {
 	return colorTerm == "truecolor" || colorTerm == "24bit"
 }
 
+// SupportsTrueColor returns whether the terminal supports 24-bit color
+func SupportsTrueColor() bool {
+	return HasTrueColor
+}
+
 // Theme colors - premium Monolythium palette
 var (
 	// Brand colors (gradient-like for monolith feel)
@@ -28,7 +33,12 @@ var (
 	ColorBrandBright = lipgloss.Color("141") // Lighter purple
 	ColorBrandDim    = lipgloss.Color("61")  // Darker purple
 
-	// Base colors
+	// App-wide background (truecolor: #0B0F14, fallback: 235)
+	ColorAppBg       = getAppBackground()
+	ColorAppBgCard   = getCardBackground()
+	ColorAppBgHeader = getHeaderBackground()
+
+	// Base colors (legacy, kept for compatibility)
 	ColorBg        = lipgloss.Color("235") // Dark background
 	ColorBgCard    = lipgloss.Color("236") // Slightly lighter for cards
 	ColorBgHeader  = lipgloss.Color("234") // Darker for header
@@ -47,6 +57,42 @@ var (
 	ColorDanger  = lipgloss.Color("196") // Red
 	ColorInfo    = lipgloss.Color("75")  // Cyan/blue
 )
+
+// getAppBackground returns the app background color based on terminal capability
+func getAppBackground() lipgloss.Color {
+	if HasTrueColor {
+		return lipgloss.Color("#0B0F14") // Modern dark background
+	}
+	return lipgloss.Color("235") // Fallback ANSI dark
+}
+
+// getCardBackground returns the card background color
+func getCardBackground() lipgloss.Color {
+	if HasTrueColor {
+		return lipgloss.Color("#12171D") // Slightly lighter for cards
+	}
+	return lipgloss.Color("236")
+}
+
+// getHeaderBackground returns the header background color
+func getHeaderBackground() lipgloss.Color {
+	if HasTrueColor {
+		return lipgloss.Color("#080A0D") // Darker for header
+	}
+	return lipgloss.Color("234")
+}
+
+// Gradient border colors for truecolor terminals
+var gradientColors = []string{
+	"#6A35FF", // Start - vibrant purple
+	"#7445FF",
+	"#7E55FF",
+	"#8866FF",
+	"#9277FF",
+	"#9C88FF",
+	"#A699FF",
+	"#B08CFF", // End - lighter purple
+}
 
 // Text styles
 var (
@@ -353,6 +399,158 @@ func CardFocused(title, body string, width int) string {
 	content := titleRendered + "\n" + body
 
 	return CardFocusedStyle.Width(width).Render(content)
+}
+
+// GradientCard creates a card with pseudo-gradient border (truecolor only)
+// Falls back to standard card if truecolor is not supported
+func GradientCard(title, body string, width int) string {
+	if width == 0 {
+		width = 40
+	}
+
+	// Fallback to standard card if no truecolor
+	if !HasTrueColor {
+		return Card(title, body, width)
+	}
+
+	titleRendered := CardTitleStyle.Render(title)
+	content := titleRendered + "\n" + body
+
+	// Split content into lines and calculate dimensions
+	contentLines := strings.Split(content, "\n")
+	innerWidth := width - 4 // Account for border and padding
+
+	// Pad/truncate content lines to inner width
+	paddedLines := make([]string, len(contentLines))
+	for i, line := range contentLines {
+		lineWidth := lipgloss.Width(line)
+		if lineWidth < innerWidth {
+			paddedLines[i] = line + strings.Repeat(" ", innerWidth-lineWidth)
+		} else {
+			paddedLines[i] = line[:innerWidth]
+		}
+	}
+
+	return renderGradientBorder(paddedLines, width)
+}
+
+// renderGradientBorder renders content with a gradient border
+func renderGradientBorder(contentLines []string, width int) string {
+	var b strings.Builder
+
+	innerWidth := width - 4 // 2 for borders, 2 for padding
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+
+	// Calculate gradient step
+	numColors := len(gradientColors)
+
+	// Top border: ╭ ─ ─ ─ ╮ with gradient
+	topBorder := renderGradientTopBorder(innerWidth+2, numColors)
+	b.WriteString(topBorder)
+	b.WriteString("\n")
+
+	// Side border color (use mid gradient color)
+	sideColor := lipgloss.Color(gradientColors[numColors/2])
+	sideStyle := lipgloss.NewStyle().Foreground(sideColor)
+
+	// Content lines with side borders
+	bgStyle := lipgloss.NewStyle().Background(ColorAppBgCard)
+	for _, line := range contentLines {
+		b.WriteString(sideStyle.Render("│"))
+		b.WriteString(bgStyle.Render(" " + line + " "))
+		b.WriteString(sideStyle.Render("│"))
+		b.WriteString("\n")
+	}
+
+	// Bottom border: ╰ ─ ─ ─ ╯ with gradient
+	bottomBorder := renderGradientBottomBorder(innerWidth+2, numColors)
+	b.WriteString(bottomBorder)
+
+	return b.String()
+}
+
+// renderGradientTopBorder renders the top border with gradient colors
+func renderGradientTopBorder(width int, numColors int) string {
+	var b strings.Builder
+
+	// Corner uses brightest color
+	cornerColor := lipgloss.Color(gradientColors[numColors-1])
+	cornerStyle := lipgloss.NewStyle().Foreground(cornerColor)
+	b.WriteString(cornerStyle.Render("╭"))
+
+	// Horizontal segments with gradient
+	segmentWidth := width / numColors
+	if segmentWidth < 1 {
+		segmentWidth = 1
+	}
+
+	remaining := width
+	for i := 0; i < numColors && remaining > 0; i++ {
+		color := lipgloss.Color(gradientColors[i])
+		style := lipgloss.NewStyle().Foreground(color)
+		chars := segmentWidth
+		if i == numColors-1 {
+			chars = remaining - 1 // Leave room for corner
+		}
+		if chars > remaining-1 {
+			chars = remaining - 1
+		}
+		if chars > 0 {
+			b.WriteString(style.Render(strings.Repeat("─", chars)))
+			remaining -= chars
+		}
+	}
+
+	b.WriteString(cornerStyle.Render("╮"))
+	return b.String()
+}
+
+// renderGradientBottomBorder renders the bottom border with gradient colors
+func renderGradientBottomBorder(width int, numColors int) string {
+	var b strings.Builder
+
+	// Corner uses brightest color
+	cornerColor := lipgloss.Color(gradientColors[numColors-1])
+	cornerStyle := lipgloss.NewStyle().Foreground(cornerColor)
+	b.WriteString(cornerStyle.Render("╰"))
+
+	// Horizontal segments with gradient (reverse direction)
+	segmentWidth := width / numColors
+	if segmentWidth < 1 {
+		segmentWidth = 1
+	}
+
+	remaining := width
+	for i := numColors - 1; i >= 0 && remaining > 0; i-- {
+		color := lipgloss.Color(gradientColors[i])
+		style := lipgloss.NewStyle().Foreground(color)
+		chars := segmentWidth
+		if i == 0 {
+			chars = remaining - 1 // Leave room for corner
+		}
+		if chars > remaining-1 {
+			chars = remaining - 1
+		}
+		if chars > 0 {
+			b.WriteString(style.Render(strings.Repeat("─", chars)))
+			remaining -= chars
+		}
+	}
+
+	b.WriteString(cornerStyle.Render("╯"))
+	return b.String()
+}
+
+// RenderAppBackground creates a full-screen background canvas
+func RenderAppBackground(content string, width, height int) string {
+	bgStyle := lipgloss.NewStyle().
+		Background(ColorAppBg).
+		Width(width).
+		Height(height)
+
+	return bgStyle.Render(content)
 }
 
 // KeyHint creates a keyboard hint like "[k] action"
