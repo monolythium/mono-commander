@@ -1,0 +1,1 @@
+monod tx staking delegate monovaloper1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5nfrmp 1000000000000000000alyth --chain-id mono-sprint-1 --home /home/user/.monod --from mykey --fees 10000alyth --generate-only

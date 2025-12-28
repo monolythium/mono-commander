@@ -19,6 +19,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Common flag variables for M4 commands
+var (
+	// Shared tx flags
+	txNetwork   string
+	txHome      string
+	txFrom      string
+	txFees      string
+	txGasPrices string
+	txGas       string
+	txNode      string
+	txChainID   string
+	txDryRun    bool
+	txExecute   bool
+)
+
 var (
 	// Global flags
 	jsonOutput bool
@@ -115,6 +130,66 @@ Or use CLI commands:
 		Short: "Tail node logs",
 		Run:   runLogs,
 	}
+
+	// M4: Validator command group
+	validatorCmd = &cobra.Command{
+		Use:   "validator",
+		Short: "Validator operations",
+	}
+
+	validatorCreateCmd = &cobra.Command{
+		Use:   "create",
+		Short: "Create a new validator (includes required 100k LYTH burn)",
+		Run:   runValidatorCreate,
+	}
+
+	// M4: Stake command group
+	stakeCmd = &cobra.Command{
+		Use:   "stake",
+		Short: "Staking operations (delegate, unbond, redelegate)",
+	}
+
+	stakeDelegateCmd = &cobra.Command{
+		Use:   "delegate",
+		Short: "Delegate tokens to a validator",
+		Run:   runStakeDelegate,
+	}
+
+	stakeUnbondCmd = &cobra.Command{
+		Use:   "unbond",
+		Short: "Unbond tokens from a validator",
+		Run:   runStakeUnbond,
+	}
+
+	stakeRedelegateCmd = &cobra.Command{
+		Use:   "redelegate",
+		Short: "Redelegate tokens between validators",
+		Run:   runStakeRedelegate,
+	}
+
+	// M4: Rewards command group
+	rewardsCmd = &cobra.Command{
+		Use:   "rewards",
+		Short: "Rewards operations",
+	}
+
+	rewardsWithdrawCmd = &cobra.Command{
+		Use:   "withdraw",
+		Short: "Withdraw staking rewards or validator commission",
+		Run:   runRewardsWithdraw,
+	}
+
+	// M4: Governance command group
+	govCmd = &cobra.Command{
+		Use:   "gov",
+		Short: "Governance operations",
+	}
+
+	govVoteCmd = &cobra.Command{
+		Use:   "vote",
+		Short: "Vote on a governance proposal",
+		Run:   runGovVote,
+	}
 )
 
 func init() {
@@ -180,6 +255,83 @@ func init() {
 	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	logsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
 	rootCmd.AddCommand(logsCmd)
+
+	// M4: Validator create command
+	addTxFlags(validatorCreateCmd)
+	validatorCreateCmd.Flags().String("moniker", "", "Validator moniker (required)")
+	validatorCreateCmd.Flags().String("identity", "", "Keybase identity (optional)")
+	validatorCreateCmd.Flags().String("website", "", "Validator website (optional)")
+	validatorCreateCmd.Flags().String("security-contact", "", "Security contact email (optional)")
+	validatorCreateCmd.Flags().String("details", "", "Validator details (optional)")
+	validatorCreateCmd.Flags().String("commission-rate", "0.10", "Commission rate (e.g., 0.10 for 10%)")
+	validatorCreateCmd.Flags().String("commission-max-rate", "0.20", "Maximum commission rate")
+	validatorCreateCmd.Flags().String("commission-max-change-rate", "0.01", "Maximum daily commission change")
+	validatorCreateCmd.Flags().String("min-self-delegation", "", "Minimum self-delegation in alyth (required, min 100000 LYTH)")
+	validatorCreateCmd.Flags().String("amount", "", "Self-bond amount in alyth (required, min 100000 LYTH)")
+	validatorCreateCmd.Flags().String("pubkey", "", "Path to consensus pubkey file (optional)")
+	validatorCreateCmd.MarkFlagRequired("moniker")
+	validatorCreateCmd.MarkFlagRequired("amount")
+	validatorCreateCmd.MarkFlagRequired("min-self-delegation")
+	validatorCmd.AddCommand(validatorCreateCmd)
+	rootCmd.AddCommand(validatorCmd)
+
+	// M4: Stake delegate command
+	addTxFlags(stakeDelegateCmd)
+	stakeDelegateCmd.Flags().String("to", "", "Validator address (monovaloper1...)")
+	stakeDelegateCmd.Flags().String("amount", "", "Amount to delegate in alyth")
+	stakeDelegateCmd.MarkFlagRequired("to")
+	stakeDelegateCmd.MarkFlagRequired("amount")
+	stakeCmd.AddCommand(stakeDelegateCmd)
+
+	// M4: Stake unbond command
+	addTxFlags(stakeUnbondCmd)
+	stakeUnbondCmd.Flags().String("from-validator", "", "Validator address (monovaloper1...)")
+	stakeUnbondCmd.Flags().String("amount", "", "Amount to unbond in alyth")
+	stakeUnbondCmd.MarkFlagRequired("from-validator")
+	stakeUnbondCmd.MarkFlagRequired("amount")
+	stakeCmd.AddCommand(stakeUnbondCmd)
+
+	// M4: Stake redelegate command
+	addTxFlags(stakeRedelegateCmd)
+	stakeRedelegateCmd.Flags().String("src", "", "Source validator address (monovaloper1...)")
+	stakeRedelegateCmd.Flags().String("dst", "", "Destination validator address (monovaloper1...)")
+	stakeRedelegateCmd.Flags().String("amount", "", "Amount to redelegate in alyth")
+	stakeRedelegateCmd.MarkFlagRequired("src")
+	stakeRedelegateCmd.MarkFlagRequired("dst")
+	stakeRedelegateCmd.MarkFlagRequired("amount")
+	stakeCmd.AddCommand(stakeRedelegateCmd)
+	rootCmd.AddCommand(stakeCmd)
+
+	// M4: Rewards withdraw command
+	addTxFlags(rewardsWithdrawCmd)
+	rewardsWithdrawCmd.Flags().String("validator", "", "Validator address (optional, for specific validator)")
+	rewardsWithdrawCmd.Flags().Bool("commission", false, "Also withdraw validator commission")
+	rewardsCmd.AddCommand(rewardsWithdrawCmd)
+	rootCmd.AddCommand(rewardsCmd)
+
+	// M4: Gov vote command
+	addTxFlags(govVoteCmd)
+	govVoteCmd.Flags().String("proposal", "", "Proposal ID (required)")
+	govVoteCmd.Flags().String("option", "", "Vote option: yes, no, abstain, no_with_veto (required)")
+	govVoteCmd.MarkFlagRequired("proposal")
+	govVoteCmd.MarkFlagRequired("option")
+	govCmd.AddCommand(govVoteCmd)
+	rootCmd.AddCommand(govCmd)
+}
+
+// addTxFlags adds common transaction flags to a command
+func addTxFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&txNetwork, "network", "Localnet", "Network name (Localnet, Sprintnet, Testnet, Mainnet)")
+	cmd.Flags().StringVar(&txHome, "home", "", "Node home directory (default: ~/.monod)")
+	cmd.Flags().StringVar(&txFrom, "from", "", "Key name or address to sign with (required)")
+	cmd.Flags().StringVar(&txFees, "fees", "", "Transaction fees in alyth (e.g., 10000alyth)")
+	cmd.Flags().StringVar(&txGasPrices, "gas-prices", "", "Gas prices in alyth (e.g., 0.025alyth)")
+	cmd.Flags().StringVar(&txGas, "gas", "auto", "Gas limit or 'auto'")
+	cmd.Flags().StringVar(&txNode, "node", "", "RPC node URL (default: localhost:26657)")
+	cmd.Flags().StringVar(&txChainID, "chain-id", "", "Chain ID override (uses network default if empty)")
+	cmd.Flags().BoolVar(&txDryRun, "dry-run", true, "Only show command, do not execute")
+	cmd.Flags().BoolVar(&txExecute, "execute", false, "Execute the transaction (overrides dry-run)")
+	cmd.MarkFlagRequired("from")
 }
 
 func main() {
@@ -654,5 +806,296 @@ func runLogs(cmd *cobra.Command, args []string) {
 
 	for line := range linesCh {
 		fmt.Println(line)
+	}
+}
+
+// =============================================================================
+// M4: Validator Action Commands
+// =============================================================================
+
+// getTxOptions builds ValidatorActionOptions from command flags
+func getTxOptions(cmd *cobra.Command) core.ValidatorActionOptions {
+	// Read flags fresh from the command to avoid stale globals
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	from, _ := cmd.Flags().GetString("from")
+	fees, _ := cmd.Flags().GetString("fees")
+	gasPrices, _ := cmd.Flags().GetString("gas-prices")
+	gas, _ := cmd.Flags().GetString("gas")
+	node, _ := cmd.Flags().GetString("node")
+	chainID, _ := cmd.Flags().GetString("chain-id")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	execute, _ := cmd.Flags().GetBool("execute")
+
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = homeDir + "/.monod"
+	}
+
+	network, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		network = core.NetworkLocalnet
+	}
+
+	var logger *slog.Logger
+	if verbose {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+
+	return core.ValidatorActionOptions{
+		Network:   network,
+		Home:      home,
+		From:      from,
+		Fees:      fees,
+		GasPrices: gasPrices,
+		Gas:       gas,
+		Node:      node,
+		ChainID:   chainID,
+		DryRun:    dryRun && !execute, // execute overrides dry-run
+		Execute:   execute,
+		Logger:    logger,
+	}
+}
+
+// printActionResult prints the result of a validator action
+func printActionResult(result *core.ValidatorActionResult) {
+	if jsonOutput {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	// Print description
+	fmt.Printf("%s\n", result.Description)
+	fmt.Println(strings.Repeat("-", 60))
+
+	// Print steps
+	for _, step := range result.Steps {
+		status := "[ ]"
+		switch step.Status {
+		case "success":
+			status = "[+]"
+		case "failed":
+			status = "[X]"
+		case "skipped":
+			status = "[-]"
+		}
+		msg := step.Name
+		if step.Message != "" {
+			msg += ": " + step.Message
+		}
+		fmt.Printf("%s %s\n", status, msg)
+	}
+
+	// Print warnings
+	for _, warn := range result.Warnings {
+		fmt.Printf("\nWARNING: %s\n", warn)
+	}
+
+	// Print command preview
+	if result.Command != nil && !result.Executed {
+		fmt.Println("\nGenerated command:")
+		fmt.Printf("  %s\n", result.Command.String())
+
+		if result.Command.RequiresMultiMsg && len(result.Command.MultiMsgCommands) > 0 {
+			fmt.Println("\nMulti-message transaction components:")
+			for i, subCmd := range result.Command.MultiMsgCommands {
+				fmt.Printf("  [%d] %s\n", i+1, subCmd.Description)
+				fmt.Printf("      %s\n", subCmd.String())
+			}
+		}
+	}
+
+	// Print execution result
+	if result.Executed {
+		if result.Success {
+			fmt.Println("\nTransaction submitted successfully!")
+			if result.TxHash != "" {
+				fmt.Printf("  TxHash: %s\n", result.TxHash)
+			}
+			if result.Height > 0 {
+				fmt.Printf("  Height: %d\n", result.Height)
+			}
+		} else {
+			fmt.Println("\nTransaction failed!")
+		}
+	}
+}
+
+func runValidatorCreate(cmd *cobra.Command, args []string) {
+	opts := getTxOptions(cmd)
+
+	// Get validator-specific flags
+	moniker, _ := cmd.Flags().GetString("moniker")
+	identity, _ := cmd.Flags().GetString("identity")
+	website, _ := cmd.Flags().GetString("website")
+	securityContact, _ := cmd.Flags().GetString("security-contact")
+	details, _ := cmd.Flags().GetString("details")
+	commissionRate, _ := cmd.Flags().GetString("commission-rate")
+	commissionMaxRate, _ := cmd.Flags().GetString("commission-max-rate")
+	commissionMaxChange, _ := cmd.Flags().GetString("commission-max-change-rate")
+	minSelfDelegation, _ := cmd.Flags().GetString("min-self-delegation")
+	amount, _ := cmd.Flags().GetString("amount")
+	pubkeyPath, _ := cmd.Flags().GetString("pubkey")
+
+	params := core.CreateValidatorParams{
+		Moniker:             moniker,
+		Identity:            identity,
+		Website:             website,
+		SecurityContact:     securityContact,
+		Details:             details,
+		CommissionRate:      commissionRate,
+		CommissionMaxRate:   commissionMaxRate,
+		CommissionMaxChange: commissionMaxChange,
+		MinSelfDelegation:   minSelfDelegation,
+		Amount:              amount,
+		PubKeyPath:          pubkeyPath,
+	}
+
+	ctx := context.Background()
+	result, err := core.CreateValidatorAction(ctx, opts, params)
+	if err != nil && result == nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printActionResult(result)
+
+	if result != nil && !result.Success {
+		os.Exit(1)
+	}
+}
+
+func runStakeDelegate(cmd *cobra.Command, args []string) {
+	opts := getTxOptions(cmd)
+
+	validatorAddr, _ := cmd.Flags().GetString("to")
+	amount, _ := cmd.Flags().GetString("amount")
+
+	params := core.DelegateParams{
+		ValidatorAddr: validatorAddr,
+		Amount:        amount,
+	}
+
+	ctx := context.Background()
+	result, err := core.DelegateAction(ctx, opts, params)
+	if err != nil && result == nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printActionResult(result)
+
+	if result != nil && !result.Success {
+		os.Exit(1)
+	}
+}
+
+func runStakeUnbond(cmd *cobra.Command, args []string) {
+	opts := getTxOptions(cmd)
+
+	validatorAddr, _ := cmd.Flags().GetString("from-validator")
+	amount, _ := cmd.Flags().GetString("amount")
+
+	params := core.UnbondParams{
+		ValidatorAddr: validatorAddr,
+		Amount:        amount,
+	}
+
+	ctx := context.Background()
+	result, err := core.UnbondAction(ctx, opts, params)
+	if err != nil && result == nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printActionResult(result)
+
+	if result != nil && !result.Success {
+		os.Exit(1)
+	}
+}
+
+func runStakeRedelegate(cmd *cobra.Command, args []string) {
+	opts := getTxOptions(cmd)
+
+	srcValidator, _ := cmd.Flags().GetString("src")
+	dstValidator, _ := cmd.Flags().GetString("dst")
+	amount, _ := cmd.Flags().GetString("amount")
+
+	params := core.RedelegateParams{
+		SrcValidatorAddr: srcValidator,
+		DstValidatorAddr: dstValidator,
+		Amount:           amount,
+	}
+
+	ctx := context.Background()
+	result, err := core.RedelegateAction(ctx, opts, params)
+	if err != nil && result == nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printActionResult(result)
+
+	if result != nil && !result.Success {
+		os.Exit(1)
+	}
+}
+
+func runRewardsWithdraw(cmd *cobra.Command, args []string) {
+	opts := getTxOptions(cmd)
+
+	validatorAddr, _ := cmd.Flags().GetString("validator")
+	commission, _ := cmd.Flags().GetBool("commission")
+
+	params := core.WithdrawRewardsParams{
+		ValidatorAddr: validatorAddr,
+		Commission:    commission,
+	}
+
+	ctx := context.Background()
+	result, err := core.WithdrawRewardsAction(ctx, opts, params)
+	if err != nil && result == nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printActionResult(result)
+
+	if result != nil && !result.Success {
+		os.Exit(1)
+	}
+}
+
+func runGovVote(cmd *cobra.Command, args []string) {
+	opts := getTxOptions(cmd)
+
+	proposalID, _ := cmd.Flags().GetString("proposal")
+	optionStr, _ := cmd.Flags().GetString("option")
+
+	// Validate vote option
+	option, err := core.ValidateVoteOption(optionStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	params := core.VoteParams{
+		ProposalID: proposalID,
+		Option:     option,
+	}
+
+	ctx := context.Background()
+	result, err := core.VoteAction(ctx, opts, params)
+	if err != nil && result == nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	printActionResult(result)
+
+	if result != nil && !result.Success {
+		os.Exit(1)
 	}
 }
