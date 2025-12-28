@@ -96,6 +96,108 @@ monoctl systemd install \
   --dry-run
 ```
 
+### Mesh/Rosetta API Sidecar
+
+The Mesh/Rosetta API is a compatibility layer for blockchain integrations. It is optional but recommended for RPC/indexer nodes.
+
+#### Install Mesh Binary
+
+```bash
+# Dry-run (preview only)
+monoctl mesh install \
+  --url https://example.com/mono-mesh-rosetta \
+  --sha256 <expected-sha256> \
+  --version v0.1.0 \
+  --dry-run
+
+# Actual install
+monoctl mesh install \
+  --url https://example.com/mono-mesh-rosetta \
+  --sha256 <expected-sha256> \
+  --version v0.1.0
+```
+
+#### Enable Mesh Service
+
+```bash
+# Dry-run
+monoctl mesh enable --network Sprintnet --dry-run
+
+# Actual enable
+monoctl mesh enable --network Sprintnet
+```
+
+#### Check Mesh Status
+
+```bash
+monoctl mesh status --network Sprintnet
+monoctl mesh status --network Sprintnet --json
+```
+
+#### View Mesh Logs
+
+```bash
+monoctl mesh logs --network Sprintnet --lines 100
+monoctl mesh logs --network Sprintnet --follow
+```
+
+#### Disable Mesh Service
+
+```bash
+monoctl mesh disable --network Sprintnet --dry-run
+monoctl mesh disable --network Sprintnet
+```
+
+#### Mesh Network Ports
+
+| Network    | Mesh Port |
+|------------|-----------|
+| Localnet   | 8080      |
+| Sprintnet  | 8081      |
+| Testnet    | 8082      |
+| Mainnet    | 8083      |
+
+### Self-Update
+
+monoctl can update itself from GitHub Releases with checksum verification.
+
+#### Check for Updates
+
+```bash
+# Check if an update is available
+monoctl update check
+
+# JSON output for automation
+monoctl update check --json
+```
+
+#### Apply Update
+
+```bash
+# Interactive update with confirmation
+monoctl update apply
+
+# Skip confirmation (for CI/automation)
+monoctl update apply --yes
+
+# Preview without making changes
+monoctl update apply --dry-run
+
+# Skip checksum verification (not recommended)
+monoctl update apply --insecure
+```
+
+#### Update via TUI
+
+In the interactive TUI, navigate to the **Update** tab and press `u` to apply an available update.
+
+#### Safety Features
+
+- **Checksum verification**: Downloads are verified against SHA256 checksums from the release
+- **Safe binary swap**: Downloads to temp location, verifies, then atomically swaps
+- **Backup retention**: Old binary is preserved with `.backup` suffix
+- **Dry-run support**: Preview changes before applying
+
 ## Safety Notes
 
 ### Security
@@ -121,8 +223,10 @@ mono-commander/
 │   ├── tui/              # Bubble Tea TUI
 │   ├── os/               # Systemd/cosmovisor helpers
 │   ├── net/              # HTTP fetcher
+│   ├── mesh/             # Mesh/Rosetta API sidecar management
+│   ├── update/           # Self-update (GitHub releases, checksums, safe swap)
 │   ├── rpc/              # RPC helpers (future)
-│   └── logs/             # Log helpers (future)
+│   └── logs/             # Log helpers
 └── testdata/             # Test fixtures
 ```
 

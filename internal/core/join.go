@@ -9,13 +9,13 @@ import (
 
 // JoinOptions contains options for the join operation.
 type JoinOptions struct {
-	Network      NetworkName
-	Home         string
-	GenesisURL   string
-	GenesisSHA   string
-	PeersURL     string
-	DryRun       bool
-	Logger       *slog.Logger
+	Network    NetworkName
+	Home       string
+	GenesisURL string
+	GenesisSHA string
+	PeersURL   string
+	DryRun     bool
+	Logger     *slog.Logger
 }
 
 // JoinResult contains the results of a join operation.

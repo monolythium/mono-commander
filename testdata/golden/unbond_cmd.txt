@@ -1,0 +1,1 @@
+monod tx staking unbond monovaloper1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5nfrmp 1000000000000000000alyth --chain-id mono-local-1 --from mykey --generate-only

@@ -1,0 +1,1 @@
+monod tx staking redelegate monovaloper1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5nfrmp monovaloper1wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww5nfrmp 1000000000000000000alyth --chain-id mono-local-1 --from mykey --generate-only

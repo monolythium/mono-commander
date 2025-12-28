@@ -39,3 +39,4 @@ Thumbs.db
 *.key
 *.pem
 mnemonic*
+docs/logs/activity.log
