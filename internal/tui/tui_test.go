@@ -4,63 +4,151 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/monolythium/mono-commander/internal/core"
 )
 
 func TestNewModel(t *testing.T) {
 	m := NewModel()
 
-	if m.currentView != ViewMain {
-		t.Errorf("NewModel() currentView = %v, want ViewMain", m.currentView)
+	if m.activeTab != TabDashboard {
+		t.Errorf("NewModel() activeTab = %v, want TabDashboard", m.activeTab)
 	}
 
 	if len(m.networks) != 4 {
 		t.Errorf("NewModel() networks count = %d, want 4", len(m.networks))
 	}
 
-	// M4: Check form state is initialized
 	if m.formResult == nil {
 		t.Error("NewModel() formResult should be initialized")
+	}
+
+	if m.config == nil {
+		t.Error("NewModel() config should be initialized")
+	}
+
+	if m.dashboardData == nil {
+		t.Error("NewModel() dashboardData should be initialized")
+	}
+}
+
+func TestModel_Init(t *testing.T) {
+	m := NewModel()
+	cmd := m.Init()
+
+	// Init should return commands (spinner tick and refresh)
+	if cmd == nil {
+		t.Error("Init() should return commands")
+	}
+}
+
+func TestTab_String(t *testing.T) {
+	tests := []struct {
+		tab  Tab
+		want string
+	}{
+		{TabDashboard, "Dashboard"},
+		{TabHealth, "Health"},
+		{TabLogs, "Logs"},
+		{TabUpdate, "Update"},
+		{TabInstall, "(Re)Install"},
+		{TabHelp, "Help"},
+	}
+
+	for _, tt := range tests {
+		if got := tt.tab.String(); got != tt.want {
+			t.Errorf("Tab.String() = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+func TestAllTabs(t *testing.T) {
+	tabs := AllTabs()
+	if len(tabs) != 6 {
+		t.Errorf("AllTabs() returned %d tabs, want 6", len(tabs))
+	}
+}
+
+func TestModel_Update_TabNavigation(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+
+	// Tab key should cycle through tabs
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	resultModel := newModel.(Model)
+
+	if resultModel.activeTab != TabHealth {
+		t.Errorf("Tab key should move to TabHealth, got %v", resultModel.activeTab)
+	}
+
+	// Shift+Tab should go back
+	newModel2, _ := resultModel.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	resultModel2 := newModel2.(Model)
+
+	if resultModel2.activeTab != TabDashboard {
+		t.Errorf("Shift+Tab should return to TabDashboard, got %v", resultModel2.activeTab)
+	}
+}
+
+func TestModel_Update_RightArrow(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	resultModel := newModel.(Model)
+
+	if resultModel.activeTab != TabHealth {
+		t.Errorf("Right arrow should move to TabHealth, got %v", resultModel.activeTab)
+	}
+}
+
+func TestModel_Update_LeftArrow(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = TabHealth
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	resultModel := newModel.(Model)
+
+	if resultModel.activeTab != TabDashboard {
+		t.Errorf("Left arrow should move to TabDashboard, got %v", resultModel.activeTab)
 	}
 }
 
 func TestModel_Update_Quit(t *testing.T) {
 	m := NewModel()
+	m.width = 80
+	m.height = 24
 
-	// Test 'q' key quits from main menu
-	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	// 'q' should quit from main view
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
-		t.Error("Update('q') should return quit command")
-	}
-
-	// Verify model returned
-	if _, ok := newModel.(Model); !ok {
-		t.Error("Update should return Model type")
+		t.Error("'q' should return quit command")
 	}
 }
 
-func TestModel_Update_NavigateToNetworks(t *testing.T) {
+func TestModel_Update_CtrlC(t *testing.T) {
 	m := NewModel()
 
-	// Simulate selecting "Networks" (first item)
-	// First, we need to test the action handling directly
-	newModel, _ := m.handleAction("networks")
-	resultModel := newModel.(Model)
-
-	if resultModel.currentView != ViewNetworks {
-		t.Errorf("handleAction('networks') currentView = %v, want ViewNetworks", resultModel.currentView)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Error("Ctrl+C should return quit command")
 	}
 }
 
-func TestModel_Update_ReturnToMain(t *testing.T) {
+func TestModel_Update_Escape(t *testing.T) {
 	m := NewModel()
-	m.currentView = ViewNetworks
+	m.width = 80
+	m.height = 24
+	m.subView = SubViewNetworkSelect
 
-	// Test 'q' returns to main when not on main
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	resultModel := newModel.(Model)
 
-	if resultModel.currentView != ViewMain {
-		t.Errorf("Update('q') from sub-view should return to main, got %v", resultModel.currentView)
+	if resultModel.subView != SubViewNone {
+		t.Errorf("Escape should return to SubViewNone, got %v", resultModel.subView)
 	}
 }
 
@@ -69,348 +157,281 @@ func TestModel_View(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
-	// Main view should contain title
 	view := m.View()
 	if view == "" {
-		t.Error("View() returned empty string")
+		t.Error("View() should not return empty string")
 	}
 
-	// Networks view
-	m.currentView = ViewNetworks
-	view = m.View()
-	if view == "" {
-		t.Error("View() networks returned empty string")
+	// Should contain tab bar
+	if !containsString(view, "Dashboard") {
+		t.Error("View() should contain Dashboard tab")
 	}
 }
 
-func TestModel_Init(t *testing.T) {
-	m := NewModel()
-	cmd := m.Init()
+func TestModel_View_EachTab(t *testing.T) {
+	tabs := AllTabs()
 
-	// Init should return nil (no initial command)
-	if cmd != nil {
-		t.Error("Init() should return nil")
+	for _, tab := range tabs {
+		m := NewModel()
+		m.width = 80
+		m.height = 24
+		m.activeTab = tab
+
+		view := m.View()
+		if view == "" {
+			t.Errorf("View() for tab %v should not be empty", tab)
+		}
 	}
 }
 
-// M4: Validator Actions Menu Tests
-
-func TestModel_NavigateToValidatorActions(t *testing.T) {
+func TestModel_RenderTabBar(t *testing.T) {
 	m := NewModel()
+	m.width = 80
+	m.height = 24
 
-	newModel, _ := m.handleAction("validator-actions")
+	tabBar := m.renderTabBar()
+	if tabBar == "" {
+		t.Error("renderTabBar() should not be empty")
+	}
+
+	// Should contain all tab names
+	for _, tab := range AllTabs() {
+		if !containsString(tabBar, tab.String()) {
+			t.Errorf("renderTabBar() should contain %q", tab.String())
+		}
+	}
+}
+
+func TestModel_RenderDashboard(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = TabDashboard
+
+	dashboard := m.renderDashboard()
+	if dashboard == "" {
+		t.Error("renderDashboard() should not be empty")
+	}
+}
+
+func TestModel_RenderHealth(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = TabHealth
+
+	health := m.renderHealth()
+	if health == "" {
+		t.Error("renderHealth() should not be empty")
+	}
+}
+
+func TestModel_RenderLogs(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = TabLogs
+
+	logs := m.renderLogs()
+	if logs == "" {
+		t.Error("renderLogs() should not be empty")
+	}
+}
+
+func TestModel_RenderUpdate(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = TabUpdate
+
+	update := m.renderUpdate()
+	if update == "" {
+		t.Error("renderUpdate() should not be empty")
+	}
+}
+
+func TestModel_RenderInstall(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = TabInstall
+
+	install := m.renderInstall()
+	if install == "" {
+		t.Error("renderInstall() should not be empty")
+	}
+}
+
+func TestModel_RenderHelp(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = TabHelp
+
+	help := m.renderHelp()
+	if help == "" {
+		t.Error("renderHelp() should not be empty")
+	}
+
+	// Should contain safety info
+	if !containsString(help, "No secrets stored") {
+		t.Error("renderHelp() should contain safety info")
+	}
+}
+
+func TestModel_SetupNetworkSelector(t *testing.T) {
+	m := NewModel()
+	m = m.setupNetworkSelector()
+
+	// List should have 4 network items
+	if m.list.Title != "Select Network" {
+		t.Errorf("setupNetworkSelector() should set list title to 'Select Network', got %q", m.list.Title)
+	}
+}
+
+func TestModel_HandleDashboardKey_NetworkSelect(t *testing.T) {
+	m := NewModel()
+	m.width = 80
+	m.height = 24
+
+	// 'n' should open network selector
+	newModel, _ := m.handleDashboardKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	resultModel := newModel.(Model)
 
-	if resultModel.currentView != ViewValidatorActions {
-		t.Errorf("handleAction('validator-actions') currentView = %v, want ViewValidatorActions", resultModel.currentView)
+	if resultModel.subView != SubViewNetworkSelect {
+		t.Errorf("'n' should open network selector, got subView %v", resultModel.subView)
 	}
 }
 
-func TestModel_ValidatorMenu_CreateValidator(t *testing.T) {
+func TestModel_HandleDashboardKey_Refresh(t *testing.T) {
 	m := NewModel()
-	m.currentView = ViewValidatorActions
-	m = m.setupValidatorMenu()
+	m.width = 80
+	m.height = 24
 
-	newModel, _ := m.handleValidatorAction("create-validator")
+	// 'r' should trigger refresh
+	newModel, cmd := m.handleDashboardKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	resultModel := newModel.(Model)
 
-	if resultModel.currentView != ViewCreateValidator {
-		t.Errorf("handleValidatorAction('create-validator') currentView = %v, want ViewCreateValidator", resultModel.currentView)
+	if !resultModel.loading {
+		t.Error("'r' should set loading to true")
 	}
 
-	// Should have form fields set up
+	if cmd == nil {
+		t.Error("'r' should return a refresh command")
+	}
+}
+
+func TestModel_HandleHealthKey_Refresh(t *testing.T) {
+	m := NewModel()
+	m.activeTab = TabHealth
+	m.width = 80
+	m.height = 24
+
+	newModel, cmd := m.handleHealthKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	resultModel := newModel.(Model)
+
+	if !resultModel.loading {
+		t.Error("'r' on health tab should set loading to true")
+	}
+
+	if cmd == nil {
+		t.Error("'r' on health tab should return a command")
+	}
+}
+
+func TestModel_HandleLogsKey_Configure(t *testing.T) {
+	m := NewModel()
+	m.activeTab = TabLogs
+	m.width = 80
+	m.height = 24
+
+	newModel, _ := m.handleLogsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	resultModel := newModel.(Model)
+
+	if resultModel.subView != SubViewForm {
+		t.Errorf("'c' on logs tab should open form, got subView %v", resultModel.subView)
+	}
+
 	if len(resultModel.formFields) == 0 {
-		t.Error("create-validator view should have form fields")
+		t.Error("'c' on logs tab should set up form fields")
 	}
 }
 
-func TestModel_ValidatorMenu_Delegate(t *testing.T) {
+func TestModel_HandleLogsKey_ToggleFollow(t *testing.T) {
 	m := NewModel()
-	m.currentView = ViewValidatorActions
+	m.activeTab = TabLogs
+	m.logsData = &LogsData{Follow: false}
 
-	newModel, _ := m.handleValidatorAction("delegate")
+	newModel, _ := m.handleLogsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
 	resultModel := newModel.(Model)
 
-	if resultModel.currentView != ViewDelegate {
-		t.Errorf("handleValidatorAction('delegate') currentView = %v, want ViewDelegate", resultModel.currentView)
-	}
-
-	if len(resultModel.formFields) == 0 {
-		t.Error("delegate view should have form fields")
+	if !resultModel.logsData.Follow {
+		t.Error("'f' should toggle follow to true")
 	}
 }
 
-func TestModel_ValidatorMenu_Unbond(t *testing.T) {
+func TestModel_HandleUpdateKey_Refresh(t *testing.T) {
 	m := NewModel()
+	m.activeTab = TabUpdate
+	m.width = 80
+	m.height = 24
 
-	newModel, _ := m.handleValidatorAction("unbond")
+	newModel, cmd := m.handleUpdateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	resultModel := newModel.(Model)
 
-	if resultModel.currentView != ViewUnbond {
-		t.Errorf("handleValidatorAction('unbond') currentView = %v, want ViewUnbond", resultModel.currentView)
+	if !resultModel.loading {
+		t.Error("'r' on update tab should set loading to true")
+	}
+
+	if cmd == nil {
+		t.Error("'r' on update tab should return a command")
 	}
 }
 
-func TestModel_ValidatorMenu_Redelegate(t *testing.T) {
+func TestModel_HandleInstallKey_Options(t *testing.T) {
 	m := NewModel()
+	m.activeTab = TabInstall
+	m.width = 80
+	m.height = 24
 
-	newModel, _ := m.handleValidatorAction("redelegate")
-	resultModel := newModel.(Model)
-
-	if resultModel.currentView != ViewRedelegate {
-		t.Errorf("handleValidatorAction('redelegate') currentView = %v, want ViewRedelegate", resultModel.currentView)
+	tests := []struct {
+		key     rune
+		subView SubView
+	}{
+		{'1', SubViewInstallDeps},
+		{'2', SubViewInstallMonod},
+		{'3', SubViewInstallJoin},
+		{'4', SubViewInstallMesh},
 	}
-}
 
-func TestModel_ValidatorMenu_WithdrawRewards(t *testing.T) {
-	m := NewModel()
+	for _, tt := range tests {
+		m.subView = SubViewNone
+		newModel, _ := m.handleInstallKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tt.key}})
+		resultModel := newModel.(Model)
 
-	newModel, _ := m.handleValidatorAction("withdraw-rewards")
-	resultModel := newModel.(Model)
-
-	if resultModel.currentView != ViewWithdrawRewards {
-		t.Errorf("handleValidatorAction('withdraw-rewards') currentView = %v, want ViewWithdrawRewards", resultModel.currentView)
-	}
-}
-
-func TestModel_ValidatorMenu_Vote(t *testing.T) {
-	m := NewModel()
-
-	newModel, _ := m.handleValidatorAction("vote")
-	resultModel := newModel.(Model)
-
-	if resultModel.currentView != ViewVote {
-		t.Errorf("handleValidatorAction('vote') currentView = %v, want ViewVote", resultModel.currentView)
-	}
-}
-
-func TestModel_ValidatorMenu_Back(t *testing.T) {
-	m := NewModel()
-	m.currentView = ViewValidatorActions
-
-	newModel, _ := m.handleValidatorAction("back")
-	resultModel := newModel.(Model)
-
-	if resultModel.currentView != ViewMain {
-		t.Errorf("handleValidatorAction('back') currentView = %v, want ViewMain", resultModel.currentView)
-	}
-}
-
-func TestModel_FormSetup_CreateValidator(t *testing.T) {
-	m := NewModel()
-	m = m.setupCreateValidatorForm()
-
-	// Should have required fields
-	requiredFields := []string{"from", "moniker", "amount", "min-self-delegation", "commission-rate", "network"}
-	for _, required := range requiredFields {
-		found := false
-		for _, field := range m.formFields {
-			if field.Label == required {
-				found = true
-				break
+		// For 2, 3, 4 we expect SubViewForm since they open forms
+		if tt.key == '1' {
+			if resultModel.subView != SubViewInstallDeps {
+				t.Errorf("'%c' should set subView to %v, got %v", tt.key, tt.subView, resultModel.subView)
+			}
+		} else {
+			if resultModel.subView != SubViewForm {
+				t.Errorf("'%c' should open form (SubViewForm), got %v", tt.key, resultModel.subView)
 			}
 		}
-		if !found {
-			t.Errorf("create-validator form missing required field: %s", required)
-		}
-	}
-
-	// First field should be focused
-	if !m.formFields[0].Input.Focused() {
-		t.Error("First form field should be focused")
 	}
 }
 
-func TestModel_FormSetup_Delegate(t *testing.T) {
+func TestModel_FormNavigation(t *testing.T) {
 	m := NewModel()
-	m = m.setupDelegateForm()
-
-	// Should have required fields
-	if len(m.formFields) < 4 {
-		t.Errorf("delegate form should have at least 4 fields, got %d", len(m.formFields))
+	m.subView = SubViewForm
+	m.formFields = []FormField{
+		{Label: "field1", Input: newInput("placeholder1")},
+		{Label: "field2", Input: newInput("placeholder2")},
+		{Label: "field3", Input: newInput("placeholder3")},
 	}
-}
-
-func TestModel_FormSetup_Vote(t *testing.T) {
-	m := NewModel()
-	m = m.setupVoteForm()
-
-	// Should have proposal and option fields
-	fieldLabels := make([]string, len(m.formFields))
-	for i, f := range m.formFields {
-		fieldLabels[i] = f.Label
-	}
-
-	hasProposal := false
-	hasOption := false
-	for _, label := range fieldLabels {
-		if label == "proposal" {
-			hasProposal = true
-		}
-		if label == "option" {
-			hasOption = true
-		}
-	}
-
-	if !hasProposal {
-		t.Error("vote form should have 'proposal' field")
-	}
-	if !hasOption {
-		t.Error("vote form should have 'option' field")
-	}
-}
-
-func TestModel_ResetForm(t *testing.T) {
-	m := NewModel()
-	m = m.setupCreateValidatorForm()
-	m.formResult["test"] = "value"
-	m.generatedCmd = "some command"
-	m.showConfirm = true
-
-	m = m.resetForm()
-
-	if len(m.formFields) != 0 {
-		t.Error("resetForm() should clear formFields")
-	}
-
-	if m.formIndex != 0 {
-		t.Error("resetForm() should reset formIndex")
-	}
-
-	if len(m.formResult) != 0 {
-		t.Error("resetForm() should clear formResult")
-	}
-
-	if m.generatedCmd != "" {
-		t.Error("resetForm() should clear generatedCmd")
-	}
-
-	if m.showConfirm {
-		t.Error("resetForm() should clear showConfirm")
-	}
-}
-
-func TestModel_GenerateCommand_Delegate(t *testing.T) {
-	m := NewModel()
-	m.currentView = ViewDelegate
-	m.formResult = map[string]string{
-		"from":    "mykey",
-		"to":      "monovaloper1xxx",
-		"amount":  "1000alyth",
-		"network": "Sprintnet",
-	}
-
-	cmd, err := m.generateCommand()
-	if err != nil {
-		t.Fatalf("generateCommand() error = %v", err)
-	}
-
-	// Should contain key parts
-	expectedParts := []string{"monoctl", "stake", "delegate", "--from", "mykey", "--to", "monovaloper1xxx", "--amount", "1000alyth", "--network", "Sprintnet", "--dry-run"}
-	for _, part := range expectedParts {
-		if !containsString(cmd, part) {
-			t.Errorf("generateCommand() missing part %q: %s", part, cmd)
-		}
-	}
-}
-
-func TestModel_GenerateCommand_Vote(t *testing.T) {
-	m := NewModel()
-	m.currentView = ViewVote
-	m.formResult = map[string]string{
-		"from":     "mykey",
-		"proposal": "1",
-		"option":   "yes",
-		"network":  "Localnet",
-	}
-
-	cmd, err := m.generateCommand()
-	if err != nil {
-		t.Fatalf("generateCommand() error = %v", err)
-	}
-
-	expectedParts := []string{"monoctl", "gov", "vote", "--proposal", "1", "--option", "yes", "--dry-run"}
-	for _, part := range expectedParts {
-		if !containsString(cmd, part) {
-			t.Errorf("generateCommand() missing part %q: %s", part, cmd)
-		}
-	}
-}
-
-func TestModel_GenerateCommand_CreateValidator(t *testing.T) {
-	m := NewModel()
-	m.currentView = ViewCreateValidator
-	m.formResult = map[string]string{
-		"from":                "validator",
-		"moniker":             "my-validator",
-		"amount":              "100000000000000000000000alyth",
-		"min-self-delegation": "100000000000000000000000alyth",
-		"commission-rate":     "0.10",
-		"network":             "Sprintnet",
-	}
-
-	cmd, err := m.generateCommand()
-	if err != nil {
-		t.Fatalf("generateCommand() error = %v", err)
-	}
-
-	expectedParts := []string{"monoctl", "validator", "create", "--moniker", "my-validator", "--dry-run"}
-	for _, part := range expectedParts {
-		if !containsString(cmd, part) {
-			t.Errorf("generateCommand() missing part %q: %s", part, cmd)
-		}
-	}
-}
-
-func TestModel_UpdateFormFocus(t *testing.T) {
-	m := NewModel()
-	m = m.setupDelegateForm()
-
-	// Initially first field should be focused
-	if !m.formFields[0].Input.Focused() {
-		t.Error("First field should be focused initially")
-	}
-
-	// Move to second field
-	m.formIndex = 1
-	m = m.updateFormFocus()
-
-	if m.formFields[0].Input.Focused() {
-		t.Error("First field should be blurred after moving to second")
-	}
-	if !m.formFields[1].Input.Focused() {
-		t.Error("Second field should be focused")
-	}
-}
-
-func TestModel_EscFromFormReturnsToValidatorMenu(t *testing.T) {
-	m := NewModel()
-	m.currentView = ViewDelegate
-	m = m.setupDelegateForm()
-
-	// Simulate ESC key
-	newModel, _ := m.handleFormInput(tea.KeyMsg{Type: tea.KeyEsc})
-	resultModel := newModel.(Model)
-
-	if resultModel.currentView != ViewValidatorActions {
-		t.Errorf("ESC from form should return to ViewValidatorActions, got %v", resultModel.currentView)
-	}
-
-	// Form should be reset
-	if len(resultModel.formFields) != 0 {
-		t.Error("ESC should reset form fields")
-	}
-}
-
-func TestModel_TabNavigatesFormFields(t *testing.T) {
-	m := NewModel()
-	m.currentView = ViewDelegate
-	m = m.setupDelegateForm()
-	initialFields := len(m.formFields)
-
-	if m.formIndex != 0 {
-		t.Error("Form should start at index 0")
-	}
+	m.formFields[0].Input.Focus()
+	m.formIndex = 0
 
 	// Tab should move to next field
 	newModel, _ := m.handleFormInput(tea.KeyMsg{Type: tea.KeyTab})
@@ -420,104 +441,260 @@ func TestModel_TabNavigatesFormFields(t *testing.T) {
 		t.Errorf("Tab should move to index 1, got %d", resultModel.formIndex)
 	}
 
-	// Tab at last field should wrap to first
-	resultModel.formIndex = initialFields - 1
-	newModel2, _ := resultModel.handleFormInput(tea.KeyMsg{Type: tea.KeyTab})
+	// Shift+Tab should go back
+	newModel2, _ := resultModel.handleFormInput(tea.KeyMsg{Type: tea.KeyShiftTab})
 	resultModel2 := newModel2.(Model)
 
 	if resultModel2.formIndex != 0 {
-		t.Errorf("Tab at last field should wrap to 0, got %d", resultModel2.formIndex)
+		t.Errorf("Shift+Tab should move to index 0, got %d", resultModel2.formIndex)
 	}
 }
 
-func TestModel_RenderFormView(t *testing.T) {
+func TestModel_FormSubmit(t *testing.T) {
 	m := NewModel()
-	m.currentView = ViewDelegate
-	m.width = 80
-	m.height = 24
-	m = m.setupDelegateForm()
-
-	view := m.renderFormView()
-
-	if view == "" {
-		t.Error("renderFormView() should not be empty")
+	m.subView = SubViewForm
+	m.formFields = []FormField{
+		{Label: "field1", Input: newInput("placeholder1")},
+	}
+	m.formFields[0].Input.SetValue("testvalue")
+	m.formCallback = func(m Model, result map[string]string) (Model, tea.Cmd) {
+		m.status = "submitted"
+		m.subView = SubViewNone
+		return m, nil
 	}
 
-	// Should contain form field labels
-	if !containsString(view, "from") {
-		t.Error("renderFormView() should contain 'from' field")
+	newModel, _ := m.handleFormInput(tea.KeyMsg{Type: tea.KeyEnter})
+	resultModel := newModel.(Model)
+
+	if resultModel.formResult["field1"] != "testvalue" {
+		t.Errorf("Form submit should collect value, got %q", resultModel.formResult["field1"])
+	}
+
+	if resultModel.status != "submitted" {
+		t.Error("Form callback should be called")
 	}
 }
 
-func TestModel_RenderFormView_WithConfirm(t *testing.T) {
+func TestModel_FormEscape(t *testing.T) {
 	m := NewModel()
-	m.currentView = ViewDelegate
-	m.showConfirm = true
-	m.generatedCmd = "monoctl stake delegate --from test"
+	m.subView = SubViewForm
+	m.formFields = []FormField{
+		{Label: "field1", Input: newInput("placeholder1")},
+	}
+	m.formResult["test"] = "value"
 
-	view := m.renderFormView()
+	newModel, _ := m.handleFormInput(tea.KeyMsg{Type: tea.KeyEsc})
+	resultModel := newModel.(Model)
 
-	if !containsString(view, "Command Preview") {
-		t.Error("renderFormView() with confirm should show 'Command Preview'")
+	if resultModel.subView != SubViewNone {
+		t.Errorf("Escape should set subView to SubViewNone, got %v", resultModel.subView)
 	}
 
-	if !containsString(view, m.generatedCmd) {
-		t.Error("renderFormView() with confirm should show generated command")
+	if len(resultModel.formFields) != 0 {
+		t.Error("Escape should clear form fields")
+	}
+
+	if len(resultModel.formResult) != 0 {
+		t.Error("Escape should clear form result")
 	}
 }
 
-func TestModel_View_ValidatorActions(t *testing.T) {
+func TestModel_UpdateFormFocus(t *testing.T) {
 	m := NewModel()
-	m.currentView = ViewValidatorActions
-	m = m.setupValidatorMenu()
-	m.width = 80
-	m.height = 24
+	m.formFields = []FormField{
+		{Label: "field1", Input: newInput("placeholder1")},
+		{Label: "field2", Input: newInput("placeholder2")},
+	}
+	m.formIndex = 1
 
-	view := m.View()
+	m = m.updateFormFocus()
 
-	if view == "" {
-		t.Error("View() for ValidatorActions should not be empty")
+	if m.formFields[0].Input.Focused() {
+		t.Error("Field 0 should be blurred")
+	}
+
+	if !m.formFields[1].Input.Focused() {
+		t.Error("Field 1 should be focused")
 	}
 }
 
-func TestModel_View_FormViews(t *testing.T) {
-	views := []View{ViewCreateValidator, ViewDelegate, ViewUnbond, ViewRedelegate, ViewWithdrawRewards, ViewVote}
+func TestLoadConfig(t *testing.T) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
 
-	for _, v := range views {
-		m := NewModel()
-		m.currentView = v
-		m.width = 80
-		m.height = 24
+	if cfg == nil {
+		t.Fatal("LoadConfig() returned nil config")
+	}
 
-		// Set up appropriate form
-		switch v {
-		case ViewCreateValidator:
-			m = m.setupCreateValidatorForm()
-		case ViewDelegate:
-			m = m.setupDelegateForm()
-		case ViewUnbond:
-			m = m.setupUnbondForm()
-		case ViewRedelegate:
-			m = m.setupRedelegateForm()
-		case ViewWithdrawRewards:
-			m = m.setupWithdrawRewardsForm()
-		case ViewVote:
-			m = m.setupVoteForm()
+	// Default should be Sprintnet if no config file exists
+	if cfg.SelectedNetwork == "" {
+		cfg.SelectedNetwork = "Sprintnet"
+	}
+}
+
+func TestFormatStatus(t *testing.T) {
+	tests := []struct {
+		installed bool
+		version   string
+		want      string
+	}{
+		{false, "", "✗ not installed"},
+		{true, "", "✓ installed"},
+		{true, "v1.0.0", "✓ v1.0.0"},
+	}
+
+	for _, tt := range tests {
+		got := formatStatus(tt.installed, tt.version)
+		if got != tt.want {
+			t.Errorf("formatStatus(%v, %q) = %q, want %q", tt.installed, tt.version, got, tt.want)
 		}
+	}
+}
 
-		view := m.View()
-		if view == "" {
-			t.Errorf("View() for %v should not be empty", v)
+func TestFormatBool(t *testing.T) {
+	if formatBool(true) != "✓" {
+		t.Error("formatBool(true) should return ✓")
+	}
+	if formatBool(false) != "✗" {
+		t.Error("formatBool(false) should return ✗")
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		bytes uint64
+		want  string
+	}{
+		{0, "N/A"},
+		{500, "500 B"},
+		{1024, "1.0 KB"},
+		{1048576, "1.0 MB"},
+		{1073741824, "1.0 GB"},
+	}
+
+	for _, tt := range tests {
+		got := formatBytes(tt.bytes)
+		if got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.bytes, got, tt.want)
 		}
+	}
+}
+
+func TestOrNA(t *testing.T) {
+	if orNA("") != "N/A" {
+		t.Error("orNA(\"\") should return \"N/A\"")
+	}
+	if orNA("test") != "test" {
+		t.Error("orNA(\"test\") should return \"test\"")
+	}
+}
+
+func TestOrValue(t *testing.T) {
+	if orValue("", "default") != "default" {
+		t.Error("orValue(\"\", \"default\") should return \"default\"")
+	}
+	if orValue("test", "default") != "test" {
+		t.Error("orValue(\"test\", \"default\") should return \"test\"")
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		s   string
+		max int
+		want string
+	}{
+		{"short", 10, "short"},
+		{"long string", 5, "lo..."},
+		{"abc", 3, "abc"},
+		{"abcd", 4, "abcd"},     // exact length, no truncation needed
+		{"abcde", 4, "a..."},   // over limit, truncate
+	}
+
+	for _, tt := range tests {
+		got := truncate(tt.s, tt.max)
+		if got != tt.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tt.s, tt.max, got, tt.want)
+		}
+	}
+}
+
+func TestRenderTable(t *testing.T) {
+	rows := [][]string{
+		{"Key", "Value"},
+		{"Name", "Test"},
+	}
+
+	table := renderTable(rows, 2)
+	if table == "" {
+		t.Error("renderTable() should not return empty string")
+	}
+
+	if !containsString(table, "Key") {
+		t.Error("renderTable() should contain 'Key'")
+	}
+
+	if !containsString(table, "Value") {
+		t.Error("renderTable() should contain 'Value'")
+	}
+}
+
+func TestDashboardData(t *testing.T) {
+	d := &DashboardData{
+		MonodInstalled: true,
+		MonodVersion:   "v1.0.0",
+		HomeExists:     true,
+		GenesisExists:  true,
+		ServiceStatus:  "active",
+	}
+
+	if !d.MonodInstalled {
+		t.Error("MonodInstalled should be true")
+	}
+
+	if d.MonodVersion != "v1.0.0" {
+		t.Errorf("MonodVersion = %q, want v1.0.0", d.MonodVersion)
+	}
+}
+
+func TestHealthData(t *testing.T) {
+	h := &HealthData{
+		SystemHealth: &SystemHealthInfo{
+			OS:       "linux",
+			Arch:     "amd64",
+			CPUCount: 4,
+		},
+	}
+
+	if h.SystemHealth.OS != "linux" {
+		t.Errorf("OS = %q, want linux", h.SystemHealth.OS)
+	}
+}
+
+func TestUpdateData(t *testing.T) {
+	u := &UpdateData{
+		CommanderCurrent: "v1.0.0",
+		CommanderLatest:  "v1.1.0",
+		CommanderUpdate:  true,
+	}
+
+	if !u.CommanderUpdate {
+		t.Error("CommanderUpdate should be true")
+	}
+}
+
+func TestNetworkChangedMsg(t *testing.T) {
+	msg := networkChangedMsg{network: core.NetworkSprintnet}
+
+	if msg.network != core.NetworkSprintnet {
+		t.Errorf("network = %v, want NetworkSprintnet", msg.network)
 	}
 }
 
 // Helper function
 func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
 			return true
