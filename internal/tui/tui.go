@@ -77,6 +77,13 @@ const (
 	ViewRedelegate
 	ViewWithdrawRewards
 	ViewVote
+	// M5: Services views
+	ViewServices
+	ViewMeshRosetta
+	ViewMeshInstall
+	ViewMeshEnable
+	ViewMeshDisable
+	ViewMeshStatus
 )
 
 // FormField represents a form input field
@@ -149,6 +156,11 @@ func NewModel() Model {
 			action:      "validator-actions",
 		},
 		MenuItem{
+			title:       "Services",
+			description: "Manage Mesh/Rosetta API and other sidecars",
+			action:      "services",
+		},
+		MenuItem{
 			title:       "Exit",
 			description: "Quit mono-commander",
 			action:      "exit",
@@ -200,7 +212,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Return to main menu or parent menu
 			if m.currentView == ViewValidatorActions {
 				m.currentView = ViewMain
-			} else if m.currentView >= ViewCreateValidator {
+			} else if m.currentView == ViewServices || m.currentView == ViewMeshRosetta {
+				m.currentView = ViewMain
+				m = m.setupMainMenu()
+			} else if m.currentView >= ViewMeshInstall && m.currentView <= ViewMeshStatus {
+				m = m.resetForm()
+				m.currentView = ViewMeshRosetta
+				m = m.setupMeshMenu()
+			} else if m.currentView >= ViewCreateValidator && m.currentView <= ViewVote {
 				m = m.resetForm()
 				m.currentView = ViewValidatorActions
 			} else {
@@ -220,15 +239,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if ok {
 					return m.handleValidatorAction(selected.action)
 				}
+			} else if m.currentView == ViewServices {
+				selected, ok := m.list.SelectedItem().(MenuItem)
+				if ok {
+					return m.handleServicesAction(selected.action)
+				}
+			} else if m.currentView == ViewMeshRosetta {
+				selected, ok := m.list.SelectedItem().(MenuItem)
+				if ok {
+					return m.handleMeshAction(selected.action)
+				}
 			}
 
 		case "esc":
-			if m.currentView == ViewValidatorActions {
+			if m.currentView == ViewValidatorActions || m.currentView == ViewServices {
 				m.currentView = ViewMain
 				m = m.setupMainMenu()
 				return m, nil
 			}
-			if m.currentView >= ViewCreateValidator {
+			if m.currentView == ViewMeshRosetta {
+				m.currentView = ViewServices
+				m = m.setupServicesMenu()
+				return m, nil
+			}
+			if m.currentView >= ViewMeshInstall && m.currentView <= ViewMeshStatus {
+				m = m.resetForm()
+				m.currentView = ViewMeshRosetta
+				m = m.setupMeshMenu()
+				return m, nil
+			}
+			if m.currentView >= ViewCreateValidator && m.currentView <= ViewVote {
 				m = m.resetForm()
 				m.currentView = ViewValidatorActions
 				m = m.setupValidatorMenu()
@@ -395,6 +435,11 @@ func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 		m = m.setupValidatorMenu()
 		return m, nil
 
+	case "services":
+		m.currentView = ViewServices
+		m = m.setupServicesMenu()
+		return m, nil
+
 	case "exit":
 		return m, tea.Quit
 	}
@@ -412,6 +457,7 @@ func (m Model) setupMainMenu() Model {
 		MenuItem{title: "Update Peers", description: "Update peer list from registry", action: "peers"},
 		MenuItem{title: "Systemd Install", description: "Generate systemd unit file", action: "systemd"},
 		MenuItem{title: "Validator Actions", description: "Create validator, delegate, unbond, vote", action: "validator-actions"},
+		MenuItem{title: "Services", description: "Manage Mesh/Rosetta API and other sidecars", action: "services"},
 		MenuItem{title: "Exit", description: "Quit mono-commander", action: "exit"},
 	}
 	m.list.SetItems(items)
@@ -642,6 +688,39 @@ func (m Model) generateCommand() (string, error) {
 		parts = append(parts, "--option", m.formResult["option"])
 		parts = append(parts, "--network", m.formResult["network"])
 
+	// M5: Mesh service commands
+	case ViewMeshInstall:
+		parts = append(parts, "mesh", "install")
+		parts = append(parts, "--network", m.formResult["network"])
+		parts = append(parts, "--url", m.formResult["url"])
+		parts = append(parts, "--sha256", m.formResult["sha256"])
+		if v := m.formResult["version"]; v != "" {
+			parts = append(parts, "--version", v)
+		}
+		parts = append(parts, "--dry-run")
+		return strings.Join(parts, " "), nil
+
+	case ViewMeshEnable:
+		parts = append(parts, "mesh", "enable")
+		parts = append(parts, "--network", m.formResult["network"])
+		if v := m.formResult["listen"]; v != "" {
+			parts = append(parts, "--listen", v)
+		}
+		if v := m.formResult["node-rpc"]; v != "" {
+			parts = append(parts, "--node-rpc", v)
+		}
+		if v := m.formResult["node-grpc"]; v != "" {
+			parts = append(parts, "--node-grpc", v)
+		}
+		parts = append(parts, "--dry-run")
+		return strings.Join(parts, " "), nil
+
+	case ViewMeshDisable:
+		parts = append(parts, "mesh", "disable")
+		parts = append(parts, "--network", m.formResult["network"])
+		parts = append(parts, "--dry-run")
+		return strings.Join(parts, " "), nil
+
 	default:
 		return "", fmt.Errorf("unknown action")
 	}
@@ -659,10 +738,14 @@ func (m Model) View() string {
 	switch m.currentView {
 	case ViewNetworks:
 		b.WriteString(m.renderNetworksView())
-	case ViewValidatorActions:
+	case ViewValidatorActions, ViewServices, ViewMeshRosetta:
 		b.WriteString(m.list.View())
 	case ViewCreateValidator, ViewDelegate, ViewUnbond, ViewRedelegate, ViewWithdrawRewards, ViewVote:
 		b.WriteString(m.renderFormView())
+	case ViewMeshInstall, ViewMeshEnable, ViewMeshDisable:
+		b.WriteString(m.renderMeshFormView())
+	case ViewMeshStatus:
+		b.WriteString(m.renderActionView())
 	case ViewJoin, ViewPeersUpdate, ViewSystemd, ViewStatus, ViewRPCCheck, ViewLogs:
 		b.WriteString(m.renderActionView())
 	default:
@@ -722,11 +805,86 @@ func (m Model) renderActionView() string {
 		title = "RPC Health Check"
 	case ViewLogs:
 		title = "Node Logs"
+	case ViewMeshStatus:
+		title = "Mesh/Rosetta API Status"
 	}
 
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
 	b.WriteString(statusStyle.Render(m.status))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderMeshFormView renders a form for mesh service actions
+func (m Model) renderMeshFormView() string {
+	var b strings.Builder
+
+	// Title
+	title := ""
+	switch m.currentView {
+	case ViewMeshInstall:
+		title = "Install Mesh/Rosetta API"
+	case ViewMeshEnable:
+		title = "Enable Mesh/Rosetta API"
+	case ViewMeshDisable:
+		title = "Disable Mesh/Rosetta API"
+	}
+	b.WriteString(titleStyle.Render(title))
+	b.WriteString("\n\n")
+
+	// Show confirm dialog if we have a generated command
+	if m.showConfirm {
+		b.WriteString(successStyle.Render("Command Preview:"))
+		b.WriteString("\n\n")
+		b.WriteString(commandStyle.Render(m.generatedCmd))
+		b.WriteString("\n\n")
+
+		// Info about mesh service
+		if m.currentView == ViewMeshEnable {
+			b.WriteString(statusStyle.Render("Note: Mesh/Rosetta API is recommended for RPC/indexer nodes."))
+			b.WriteString("\n")
+			b.WriteString(statusStyle.Render("      It should be OFF for validators to minimize attack surface."))
+			b.WriteString("\n\n")
+		}
+
+		// Confirmation options
+		options := []string{"Copy Command", "Run with --dry-run=false", "Back"}
+		for i, opt := range options {
+			cursor := "  "
+			style := blurredStyle
+			if i == m.confirmChoice {
+				cursor = "> "
+				style = focusedStyle
+			}
+			b.WriteString(style.Render(cursor + opt))
+			b.WriteString("\n")
+		}
+
+		return b.String()
+	}
+
+	// Render form fields
+	for i, field := range m.formFields {
+		label := field.Label
+		if field.Required {
+			label += " *"
+		}
+
+		style := blurredStyle
+		if i == m.formIndex {
+			style = focusedStyle
+		}
+
+		b.WriteString(style.Render(label))
+		b.WriteString("\n")
+		b.WriteString("  ")
+		b.WriteString(field.Input.View())
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(statusStyle.Render("Tab/↓: next field • Shift+Tab/↑: prev • Enter: submit • Esc: cancel"))
 	b.WriteString("\n")
 
 	return b.String()
@@ -810,6 +968,142 @@ func (m Model) renderFormView() string {
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+// =============================================================================
+// M5: Services Menu
+// =============================================================================
+
+func (m Model) setupServicesMenu() Model {
+	items := []list.Item{
+		MenuItem{
+			title:       "Mesh/Rosetta API",
+			description: "Manage Rosetta-compatible API sidecar",
+			action:      "mesh-rosetta",
+		},
+		MenuItem{
+			title:       "Back",
+			description: "Return to main menu",
+			action:      "back",
+		},
+	}
+	m.list.SetItems(items)
+	m.list.Title = "Services"
+	return m
+}
+
+func (m Model) handleServicesAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "mesh-rosetta":
+		m.currentView = ViewMeshRosetta
+		m = m.setupMeshMenu()
+		return m, nil
+	case "back":
+		m.currentView = ViewMain
+		m = m.setupMainMenu()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) setupMeshMenu() Model {
+	items := []list.Item{
+		MenuItem{
+			title:       "Install",
+			description: "Install the Mesh/Rosetta API binary",
+			action:      "mesh-install",
+		},
+		MenuItem{
+			title:       "Enable",
+			description: "Enable and start the service",
+			action:      "mesh-enable",
+		},
+		MenuItem{
+			title:       "Disable",
+			description: "Stop and disable the service",
+			action:      "mesh-disable",
+		},
+		MenuItem{
+			title:       "Status",
+			description: "Check service status and health",
+			action:      "mesh-status",
+		},
+		MenuItem{
+			title:       "Logs",
+			description: "View service logs",
+			action:      "mesh-logs",
+		},
+		MenuItem{
+			title:       "Back",
+			description: "Return to Services menu",
+			action:      "back",
+		},
+	}
+	m.list.SetItems(items)
+	m.list.Title = "Mesh/Rosetta API"
+	return m
+}
+
+func (m Model) handleMeshAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "mesh-install":
+		m.currentView = ViewMeshInstall
+		m = m.setupMeshInstallForm()
+		return m, nil
+	case "mesh-enable":
+		m.currentView = ViewMeshEnable
+		m = m.setupMeshEnableForm()
+		return m, nil
+	case "mesh-disable":
+		m.currentView = ViewMeshDisable
+		m = m.setupMeshDisableForm()
+		return m, nil
+	case "mesh-status":
+		m.currentView = ViewMeshStatus
+		m.status = "Status requires CLI mode. Use: monoctl mesh status --network <network> [--json]"
+		return m, nil
+	case "mesh-logs":
+		m.status = "Logs requires CLI mode. Use: monoctl mesh logs --network <network> [-f] [-n 50]"
+		return m, nil
+	case "back":
+		m.currentView = ViewServices
+		m = m.setupServicesMenu()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) setupMeshInstallForm() Model {
+	m.formFields = []FormField{
+		{Label: "network", Placeholder: "Sprintnet", Required: true, Input: newInput("Network name")},
+		{Label: "url", Placeholder: "https://...", Required: true, Input: newInput("Download URL")},
+		{Label: "sha256", Placeholder: "abc123...", Required: true, Input: newInput("SHA256 checksum")},
+		{Label: "version", Placeholder: "v1.0.0", Required: false, Input: newInput("Version (optional)")},
+	}
+	m.formFields[0].Input.Focus()
+	m.formIndex = 0
+	return m
+}
+
+func (m Model) setupMeshEnableForm() Model {
+	m.formFields = []FormField{
+		{Label: "network", Placeholder: "Sprintnet", Required: true, Input: newInput("Network name")},
+		{Label: "listen", Placeholder: "0.0.0.0:8080", Required: false, Input: newInput("Listen address (optional)")},
+		{Label: "node-rpc", Placeholder: "http://localhost:26657", Required: false, Input: newInput("Node RPC URL (optional)")},
+		{Label: "node-grpc", Placeholder: "localhost:9090", Required: false, Input: newInput("Node gRPC address (optional)")},
+	}
+	m.formFields[0].Input.Focus()
+	m.formIndex = 0
+	return m
+}
+
+func (m Model) setupMeshDisableForm() Model {
+	m.formFields = []FormField{
+		{Label: "network", Placeholder: "Sprintnet", Required: true, Input: newInput("Network name")},
+	}
+	m.formFields[0].Input.Focus()
+	m.formIndex = 0
+	return m
 }
 
 // Run starts the TUI application

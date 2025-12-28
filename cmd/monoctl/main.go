@@ -13,6 +13,7 @@ import (
 
 	"github.com/monolythium/mono-commander/internal/core"
 	"github.com/monolythium/mono-commander/internal/logs"
+	"github.com/monolythium/mono-commander/internal/mesh"
 	"github.com/monolythium/mono-commander/internal/net"
 	oshelpers "github.com/monolythium/mono-commander/internal/os"
 	"github.com/monolythium/mono-commander/internal/tui"
@@ -190,6 +191,50 @@ Or use CLI commands:
 		Short: "Vote on a governance proposal",
 		Run:   runGovVote,
 	}
+
+	// M5: Mesh/Rosetta API command group
+	meshCmd = &cobra.Command{
+		Use:   "mesh",
+		Short: "Mesh/Rosetta API sidecar management",
+		Long: `Manage the Mesh/Rosetta API sidecar for exchange and institution integration.
+
+The sidecar runs as a separate process alongside your node, exposing a
+Rosetta-compatible API on port 8080 (by default).
+
+Recommended configuration:
+  - OFF for validators (minimize attack surface)
+  - ON for RPC/indexer nodes (enable exchange integration)`,
+	}
+
+	meshInstallCmd = &cobra.Command{
+		Use:   "install",
+		Short: "Install the Mesh/Rosetta API binary",
+		Run:   runMeshInstall,
+	}
+
+	meshEnableCmd = &cobra.Command{
+		Use:   "enable",
+		Short: "Enable and start the Mesh/Rosetta API service",
+		Run:   runMeshEnable,
+	}
+
+	meshDisableCmd = &cobra.Command{
+		Use:   "disable",
+		Short: "Stop and disable the Mesh/Rosetta API service",
+		Run:   runMeshDisable,
+	}
+
+	meshStatusCmd = &cobra.Command{
+		Use:   "status",
+		Short: "Show Mesh/Rosetta API service status",
+		Run:   runMeshStatus,
+	}
+
+	meshLogsCmd = &cobra.Command{
+		Use:   "logs",
+		Short: "Tail Mesh/Rosetta API service logs",
+		Run:   runMeshLogs,
+	}
 )
 
 func init() {
@@ -317,6 +362,47 @@ func init() {
 	govVoteCmd.MarkFlagRequired("option")
 	govCmd.AddCommand(govVoteCmd)
 	rootCmd.AddCommand(govCmd)
+
+	// M5: Mesh/Rosetta API commands
+	// mesh install
+	meshInstallCmd.Flags().String("network", "Localnet", "Network name (Localnet, Sprintnet, Testnet, Mainnet)")
+	meshInstallCmd.Flags().String("home", "", "Node home directory (default: user home)")
+	meshInstallCmd.Flags().String("version", "", "Version to install")
+	meshInstallCmd.Flags().String("url", "", "Download URL for the binary")
+	meshInstallCmd.Flags().String("sha256", "", "Expected SHA256 checksum of the binary")
+	meshInstallCmd.Flags().Bool("insecure", false, "Skip checksum verification (not recommended)")
+	meshInstallCmd.Flags().Bool("system", false, "Install to /usr/local/bin (requires sudo)")
+	meshInstallCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	meshCmd.AddCommand(meshInstallCmd)
+
+	// mesh enable
+	meshEnableCmd.Flags().String("network", "Localnet", "Network name")
+	meshEnableCmd.Flags().String("home", "", "Node home directory")
+	meshEnableCmd.Flags().String("listen", "", "Listen address (default: 0.0.0.0:8080)")
+	meshEnableCmd.Flags().String("node-rpc", "", "Node RPC URL (default: http://localhost:26657)")
+	meshEnableCmd.Flags().String("node-grpc", "", "Node gRPC address (default: localhost:9090)")
+	meshEnableCmd.Flags().String("user", "", "System user to run as (default: current user)")
+	meshEnableCmd.Flags().Bool("dry-run", false, "Show what would be done")
+	meshCmd.AddCommand(meshEnableCmd)
+
+	// mesh disable
+	meshDisableCmd.Flags().String("network", "Localnet", "Network name")
+	meshDisableCmd.Flags().String("home", "", "Node home directory")
+	meshDisableCmd.Flags().Bool("dry-run", false, "Show what would be done")
+	meshCmd.AddCommand(meshDisableCmd)
+
+	// mesh status
+	meshStatusCmd.Flags().String("network", "Localnet", "Network name")
+	meshStatusCmd.Flags().String("home", "", "Node home directory")
+	meshCmd.AddCommand(meshStatusCmd)
+
+	// mesh logs
+	meshLogsCmd.Flags().String("network", "Localnet", "Network name")
+	meshLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	meshLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
+	meshCmd.AddCommand(meshLogsCmd)
+
+	rootCmd.AddCommand(meshCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -1097,5 +1183,376 @@ func runGovVote(cmd *cobra.Command, args []string) {
 
 	if result != nil && !result.Success {
 		os.Exit(1)
+	}
+}
+
+// =============================================================================
+// M5: Mesh/Rosetta API Commands
+// =============================================================================
+
+func runMeshInstall(cmd *cobra.Command, args []string) {
+	url, _ := cmd.Flags().GetString("url")
+	sha256sum, _ := cmd.Flags().GetString("sha256")
+	version, _ := cmd.Flags().GetString("version")
+	insecure, _ := cmd.Flags().GetBool("insecure")
+	useSystem, _ := cmd.Flags().GetBool("system")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	opts := mesh.InstallOptions{
+		URL:           url,
+		SHA256:        sha256sum,
+		Version:       version,
+		UseSystemPath: useSystem,
+		Insecure:      insecure,
+		DryRun:        dryRun,
+	}
+
+	result := mesh.Install(opts)
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		if !result.Success {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Human-readable output
+	fmt.Println("Mesh/Rosetta API Binary Installation")
+	fmt.Println(strings.Repeat("-", 50))
+
+	if dryRun {
+		fmt.Println("(DRY RUN - no changes will be made)")
+		fmt.Println()
+	}
+
+	for _, step := range result.Steps {
+		status := "[ ]"
+		switch step.Status {
+		case "success":
+			status = "[+]"
+		case "failed":
+			status = "[X]"
+		case "skipped":
+			status = "[-]"
+		}
+		msg := step.Name
+		if step.Message != "" {
+			msg += ": " + step.Message
+		}
+		fmt.Printf("%s %s\n", status, msg)
+	}
+
+	if result.Error != nil {
+		fmt.Fprintf(os.Stderr, "\nError: %v\n", result.Error)
+		os.Exit(1)
+	}
+
+	if result.Success && !dryRun {
+		fmt.Printf("\nBinary installed to: %s\n", result.InstallPath)
+		if result.SHA256 != "" {
+			fmt.Printf("SHA256: %s\n", result.SHA256)
+		}
+	}
+}
+
+func runMeshEnable(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	listen, _ := cmd.Flags().GetString("listen")
+	nodeRPC, _ := cmd.Flags().GetString("node-rpc")
+	nodeGRPC, _ := cmd.Flags().GetString("node-grpc")
+	user, _ := cmd.Flags().GetString("user")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	network, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = homeDir
+	}
+
+	if user == "" {
+		user = os.Getenv("USER")
+		if user == "" {
+			user = "monod"
+		}
+	}
+
+	// Create/load config
+	var cfg *mesh.Config
+	if mesh.ConfigExists(home, network) {
+		cfg, err = mesh.LoadConfig(home, network)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		cfg = mesh.DefaultConfig(network)
+	}
+
+	// Apply overrides
+	cfg.Merge(mesh.MergeOptions{
+		ListenAddress:   listen,
+		NodeRPCURL:      nodeRPC,
+		NodeGRPCAddress: nodeGRPC,
+	})
+
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Save config
+	configContent, err := mesh.SaveConfig(home, network, cfg, dryRun)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Generate systemd unit
+	systemdCfg := mesh.DefaultSystemdConfig(string(network), user, home, network)
+	unitPath, unitContent, err := mesh.WriteSystemdUnit(systemdCfg, dryRun)
+	if err != nil && !dryRun {
+		fmt.Fprintf(os.Stderr, "Error writing systemd unit: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		out := map[string]interface{}{
+			"config_path":  mesh.ConfigPath(home, network),
+			"unit_path":    unitPath,
+			"unit_name":    mesh.UnitName(string(network)),
+			"dry_run":      dryRun,
+			"config":       cfg,
+			"unit_content": unitContent,
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	// Human-readable output
+	fmt.Println("Mesh/Rosetta API Service Enable")
+	fmt.Println(strings.Repeat("-", 50))
+
+	if dryRun {
+		fmt.Println("(DRY RUN - no changes will be made)")
+		fmt.Println()
+
+		fmt.Println("Config file would be written to:")
+		fmt.Printf("  %s\n\n", mesh.ConfigPath(home, network))
+		fmt.Println("Config content:")
+		fmt.Println(configContent)
+		fmt.Println()
+
+		fmt.Println("Systemd unit file would be written to:")
+		fmt.Printf("  %s\n\n", unitPath)
+		fmt.Println("Unit content:")
+		fmt.Println(unitContent)
+		return
+	}
+
+	// Enable and start service
+	result, err := mesh.EnableService(string(network), false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error enabling service: %v\n", err)
+		fmt.Println()
+		fmt.Println("You may need to run the following commands manually:")
+		fmt.Println(mesh.SystemdInstructions(unitPath, mesh.UnitName(string(network))))
+		os.Exit(1)
+	}
+
+	fmt.Printf("[+] Config written to: %s\n", mesh.ConfigPath(home, network))
+	fmt.Printf("[+] Unit file written to: %s\n", unitPath)
+	if result.Enabled {
+		fmt.Printf("[+] Service enabled: %s\n", result.UnitName)
+	}
+	if result.Started {
+		fmt.Printf("[+] Service started: %s\n", result.UnitName)
+	}
+
+	fmt.Println()
+	fmt.Printf("Mesh/Rosetta API is now running at: %s\n", cfg.ListenAddress)
+}
+
+func runMeshDisable(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	network, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput && dryRun {
+		out := map[string]interface{}{
+			"unit_name": mesh.UnitName(string(network)),
+			"dry_run":   true,
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	result, err := mesh.DisableService(string(network), dryRun)
+
+	if jsonOutput {
+		out := map[string]interface{}{
+			"unit_name": result.UnitName,
+			"stopped":   result.Stopped,
+			"disabled":  result.Disabled,
+			"dry_run":   dryRun,
+		}
+		if result.Error != nil {
+			out["error"] = result.Error.Error()
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		if result.Error != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
+	fmt.Println("Mesh/Rosetta API Service Disable")
+	fmt.Println(strings.Repeat("-", 50))
+
+	if dryRun {
+		fmt.Println("(DRY RUN)")
+		fmt.Printf("Would stop and disable: %s\n", mesh.UnitName(string(network)))
+		return
+	}
+
+	if result.Stopped {
+		fmt.Printf("[+] Service stopped: %s\n", result.UnitName)
+	}
+	if result.Disabled {
+		fmt.Printf("[+] Service disabled: %s\n", result.UnitName)
+	}
+
+	if result.Error != nil {
+		fmt.Fprintf(os.Stderr, "\nWarning: %v\n", result.Error)
+	}
+}
+
+func runMeshStatus(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+
+	network, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = homeDir
+	}
+
+	ctx := context.Background()
+	result := mesh.FullCheck(ctx, string(network), home, network)
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	// Human-readable output
+	fmt.Printf("Mesh/Rosetta API Status - %s\n", network)
+	fmt.Println(strings.Repeat("-", 50))
+
+	// Binary status
+	binaryStatus := "NOT INSTALLED"
+	if result.BinaryExists {
+		binaryStatus = "INSTALLED"
+	}
+	fmt.Printf("Binary:        %s\n", binaryStatus)
+
+	// Config status
+	configStatus := "NOT CONFIGURED"
+	if result.ConfigExists {
+		configStatus = "CONFIGURED"
+	}
+	fmt.Printf("Config:        %s\n", configStatus)
+
+	// Systemd status
+	if result.SystemdStatus != nil {
+		fmt.Printf("Service:       %s (%s)\n", result.SystemdStatus.ActiveState, result.SystemdStatus.SubState)
+		if result.SystemdStatus.MainPID > 0 {
+			fmt.Printf("PID:           %d\n", result.SystemdStatus.MainPID)
+		}
+	} else {
+		fmt.Printf("Service:       (systemd not available)\n")
+	}
+
+	// Health check
+	if result.ServiceHealth != nil {
+		healthStatus := "UNHEALTHY"
+		if result.ServiceHealth.Healthy {
+			healthStatus = "HEALTHY"
+		}
+		fmt.Printf("Health:        %s (via %s, %dms)\n",
+			healthStatus,
+			result.ServiceHealth.Method,
+			result.ServiceHealth.ResponseTime)
+		if result.ServiceHealth.Error != "" {
+			fmt.Printf("Error:         %s\n", result.ServiceHealth.Error)
+		}
+		fmt.Printf("Listen:        %s\n", result.ServiceHealth.ListenAddress)
+	}
+}
+
+func runMeshLogs(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	follow, _ := cmd.Flags().GetBool("follow")
+	lines, _ := cmd.Flags().GetInt("lines")
+
+	network, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	opts := mesh.LogsOptions{
+		Network: string(network),
+		Follow:  follow,
+		Lines:   lines,
+	}
+
+	source, err := mesh.GetLogSource(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer source.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle interrupt
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	linesCh, err := source.Lines(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	for line := range linesCh {
+		fmt.Println(line)
 	}
 }

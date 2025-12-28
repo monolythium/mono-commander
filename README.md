@@ -96,6 +96,67 @@ monoctl systemd install \
   --dry-run
 ```
 
+### Mesh/Rosetta API Sidecar
+
+The Mesh/Rosetta API is a compatibility layer for blockchain integrations. It is optional but recommended for RPC/indexer nodes.
+
+#### Install Mesh Binary
+
+```bash
+# Dry-run (preview only)
+monoctl mesh install \
+  --url https://example.com/mono-mesh-rosetta \
+  --sha256 <expected-sha256> \
+  --version v0.1.0 \
+  --dry-run
+
+# Actual install
+monoctl mesh install \
+  --url https://example.com/mono-mesh-rosetta \
+  --sha256 <expected-sha256> \
+  --version v0.1.0
+```
+
+#### Enable Mesh Service
+
+```bash
+# Dry-run
+monoctl mesh enable --network Sprintnet --dry-run
+
+# Actual enable
+monoctl mesh enable --network Sprintnet
+```
+
+#### Check Mesh Status
+
+```bash
+monoctl mesh status --network Sprintnet
+monoctl mesh status --network Sprintnet --json
+```
+
+#### View Mesh Logs
+
+```bash
+monoctl mesh logs --network Sprintnet --lines 100
+monoctl mesh logs --network Sprintnet --follow
+```
+
+#### Disable Mesh Service
+
+```bash
+monoctl mesh disable --network Sprintnet --dry-run
+monoctl mesh disable --network Sprintnet
+```
+
+#### Mesh Network Ports
+
+| Network    | Mesh Port |
+|------------|-----------|
+| Localnet   | 8080      |
+| Sprintnet  | 8081      |
+| Testnet    | 8082      |
+| Mainnet    | 8083      |
+
 ## Safety Notes
 
 ### Security
@@ -121,8 +182,9 @@ mono-commander/
 │   ├── tui/              # Bubble Tea TUI
 │   ├── os/               # Systemd/cosmovisor helpers
 │   ├── net/              # HTTP fetcher
+│   ├── mesh/             # Mesh/Rosetta API sidecar management
 │   ├── rpc/              # RPC helpers (future)
-│   └── logs/             # Log helpers (future)
+│   └── logs/             # Log helpers
 └── testdata/             # Test fixtures
 ```
 
