@@ -157,6 +157,47 @@ monoctl mesh disable --network Sprintnet
 | Testnet    | 8082      |
 | Mainnet    | 8083      |
 
+### Self-Update
+
+monoctl can update itself from GitHub Releases with checksum verification.
+
+#### Check for Updates
+
+```bash
+# Check if an update is available
+monoctl update check
+
+# JSON output for automation
+monoctl update check --json
+```
+
+#### Apply Update
+
+```bash
+# Interactive update with confirmation
+monoctl update apply
+
+# Skip confirmation (for CI/automation)
+monoctl update apply --yes
+
+# Preview without making changes
+monoctl update apply --dry-run
+
+# Skip checksum verification (not recommended)
+monoctl update apply --insecure
+```
+
+#### Update via TUI
+
+In the interactive TUI, navigate to the **Update** tab and press `u` to apply an available update.
+
+#### Safety Features
+
+- **Checksum verification**: Downloads are verified against SHA256 checksums from the release
+- **Safe binary swap**: Downloads to temp location, verifies, then atomically swaps
+- **Backup retention**: Old binary is preserved with `.backup` suffix
+- **Dry-run support**: Preview changes before applying
+
 ## Safety Notes
 
 ### Security
@@ -183,6 +224,7 @@ mono-commander/
 │   ├── os/               # Systemd/cosmovisor helpers
 │   ├── net/              # HTTP fetcher
 │   ├── mesh/             # Mesh/Rosetta API sidecar management
+│   ├── update/           # Self-update (GitHub releases, checksums, safe swap)
 │   ├── rpc/              # RPC helpers (future)
 │   └── logs/             # Log helpers
 └── testdata/             # Test fixtures

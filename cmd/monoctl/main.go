@@ -17,6 +17,7 @@ import (
 	"github.com/monolythium/mono-commander/internal/net"
 	oshelpers "github.com/monolythium/mono-commander/internal/os"
 	"github.com/monolythium/mono-commander/internal/tui"
+	"github.com/monolythium/mono-commander/internal/update"
 	"github.com/spf13/cobra"
 )
 
@@ -235,6 +236,33 @@ Recommended configuration:
 		Short: "Tail Mesh/Rosetta API service logs",
 		Run:   runMeshLogs,
 	}
+
+	// M7: Update command group
+	updateCmd = &cobra.Command{
+		Use:   "update",
+		Short: "Commander self-update commands",
+		Long: `Manage Commander (monoctl) updates from GitHub Releases.
+
+Check for updates:
+  monoctl update check [--json]
+
+Apply updates:
+  monoctl update apply [--yes] [--insecure] [--dry-run]
+
+Updates are verified using SHA256 checksums from the release.`,
+	}
+
+	updateCheckCmd = &cobra.Command{
+		Use:   "check",
+		Short: "Check for Commander updates",
+		Run:   runUpdateCheck,
+	}
+
+	updateApplyCmd = &cobra.Command{
+		Use:   "apply",
+		Short: "Apply Commander update",
+		Run:   runUpdateApply,
+	}
 )
 
 func init() {
@@ -403,6 +431,16 @@ func init() {
 	meshCmd.AddCommand(meshLogsCmd)
 
 	rootCmd.AddCommand(meshCmd)
+
+	// M7: Update commands
+	updateCmd.AddCommand(updateCheckCmd)
+
+	updateApplyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	updateApplyCmd.Flags().Bool("insecure", false, "Skip checksum verification (not recommended)")
+	updateApplyCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	updateCmd.AddCommand(updateApplyCmd)
+
+	rootCmd.AddCommand(updateCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -1554,5 +1592,178 @@ func runMeshLogs(cmd *cobra.Command, args []string) {
 
 	for line := range linesCh {
 		fmt.Println(line)
+	}
+}
+
+// =============================================================================
+// M7: Update Commands
+// =============================================================================
+
+func runUpdateCheck(cmd *cobra.Command, args []string) {
+	client := update.NewClient()
+	result, err := client.Check(tui.Version)
+
+	if err != nil {
+		if jsonOutput {
+			data, _ := json.MarshalIndent(map[string]interface{}{
+				"error": err.Error(),
+			}, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	// Human-readable output
+	fmt.Println("Commander Update Check")
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Printf("Current version:  %s\n", result.CurrentVersion)
+	fmt.Printf("Latest version:   %s\n", result.LatestVersion)
+	fmt.Printf("Published:        %s\n", result.PublishedAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Release URL:      %s\n", result.ReleaseURL)
+	fmt.Println()
+
+	switch result.Status {
+	case "up-to-date":
+		fmt.Println("Status: ✓ Up to date")
+	case "update-available":
+		fmt.Println("Status: ⚠ Update available")
+		if result.DownloadURL != "" {
+			fmt.Printf("\nDownload: %s\n", result.DownloadURL)
+		}
+		fmt.Println("\nRun 'monoctl update apply' to update.")
+	default:
+		fmt.Println("Status: Unknown")
+		if result.Error != "" {
+			fmt.Printf("Error: %s\n", result.Error)
+		}
+	}
+}
+
+func runUpdateApply(cmd *cobra.Command, args []string) {
+	yes, _ := cmd.Flags().GetBool("yes")
+	insecure, _ := cmd.Flags().GetBool("insecure")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	client := update.NewClient()
+
+	// First check for updates
+	checkResult, err := client.Check(tui.Version)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error checking for updates: %v\n", err)
+		os.Exit(1)
+	}
+
+	if !checkResult.UpdateAvailable {
+		fmt.Println("Already up to date.")
+		return
+	}
+
+	// Show what we're about to do
+	fmt.Printf("Update available: %s → %s\n", checkResult.CurrentVersion, checkResult.LatestVersion)
+
+	if checkResult.DownloadURL == "" {
+		fmt.Fprintf(os.Stderr, "Error: No matching asset for your OS/architecture\n")
+		fmt.Fprintf(os.Stderr, "Download manually from: %s\n", checkResult.ReleaseURL)
+		os.Exit(1)
+	}
+
+	if dryRun {
+		fmt.Println("(DRY RUN - no changes will be made)")
+	}
+
+	// Confirm unless --yes
+	if !yes && !dryRun {
+		fmt.Print("\nProceed with update? [y/N]: ")
+		var response string
+		fmt.Scanln(&response)
+		response = strings.ToLower(strings.TrimSpace(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Update cancelled.")
+			return
+		}
+	}
+
+	opts := update.ApplyOptions{
+		CurrentVersion: tui.Version,
+		Yes:            yes,
+		Insecure:       insecure,
+		DryRun:         dryRun,
+		OnProgress: func(step, message string) {
+			if verbose {
+				fmt.Printf("[%s] %s\n", step, message)
+			}
+		},
+	}
+
+	result, err := client.Apply(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		if !result.Success {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Human-readable output
+	fmt.Println()
+	fmt.Println("Commander Update")
+	fmt.Println(strings.Repeat("-", 50))
+
+	for _, step := range result.Steps {
+		status := "[ ]"
+		switch step.Status {
+		case "success":
+			status = "[+]"
+		case "failed":
+			status = "[X]"
+		case "skipped":
+			status = "[-]"
+		}
+		msg := step.Name
+		if step.Message != "" {
+			msg += ": " + step.Message
+		}
+		fmt.Printf("%s %s\n", status, msg)
+	}
+
+	if result.Error != "" {
+		fmt.Fprintf(os.Stderr, "\nError: %s\n", result.Error)
+		if result.NeedsSudo {
+			fmt.Println("\nTo complete the update manually:")
+			fmt.Printf("  1. Download: %s\n", checkResult.DownloadURL)
+			fmt.Printf("  2. Verify checksum (if available)\n")
+			fmt.Printf("  3. sudo mv <downloaded-binary> %s\n", result.PreviousPath)
+		}
+		os.Exit(1)
+	}
+
+	if result.Success {
+		fmt.Println()
+		if dryRun {
+			fmt.Printf("Would update: %s → %s\n", result.OldVersion, result.NewVersion)
+		} else {
+			fmt.Printf("Update successful: %s → %s\n", result.OldVersion, result.NewVersion)
+			if result.BackupPath != "" {
+				fmt.Printf("Backup stored at: %s\n", result.BackupPath)
+			}
+			if result.ChecksumVerify {
+				fmt.Println("Checksum verified ✓")
+			}
+			fmt.Println("\nPlease restart monoctl to use the new version.")
+		}
 	}
 }

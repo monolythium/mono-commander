@@ -19,6 +19,7 @@ import (
 	"github.com/monolythium/mono-commander/internal/logs"
 	"github.com/monolythium/mono-commander/internal/mesh"
 	"github.com/monolythium/mono-commander/internal/net"
+	"github.com/monolythium/mono-commander/internal/update"
 )
 
 // Messages for async operations
@@ -43,6 +44,11 @@ type logsErrorMsg struct {
 type updateCheckMsg struct {
 	data *UpdateData
 	err  error
+}
+
+type updateApplyMsg struct {
+	result *update.ApplyResult
+	err    error
 }
 
 type networkChangedMsg struct {
@@ -124,6 +130,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.updateData = msg.data
 			m.err = nil
+		}
+		return m, nil
+
+	case updateApplyMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = fmt.Sprintf("Update failed: %v", msg.err)
+		} else if msg.result != nil {
+			if msg.result.Success {
+				m.status = fmt.Sprintf("Updated to %s. Please restart monoctl.", msg.result.NewVersion)
+				m.err = nil
+			} else {
+				m.status = fmt.Sprintf("Update failed: %s", msg.result.Error)
+				if msg.result.NeedsSudo {
+					m.status += " (needs sudo)"
+				}
+			}
 		}
 		return m, nil
 
@@ -511,13 +535,36 @@ func (m Model) checkUpdates() tea.Cmd {
 			}
 		}
 
-		// TODO: Check GitHub releases for latest versions
-		// For now, just report current versions
-		data.CommanderLatest = Version
+		// Check GitHub releases for Commander
+		client := update.NewClient()
+		result, err := client.Check(Version)
+		if err == nil && result != nil {
+			data.CommanderLatest = result.LatestVersion
+			data.CommanderUpdate = result.UpdateAvailable
+		} else {
+			data.CommanderLatest = Version
+		}
+
 		data.MonodLatest = "check manually"
 		data.SidecarLatest = "check manually"
 
 		return updateCheckMsg{data: data}
+	}
+}
+
+// applyUpdate applies a Commander self-update
+func (m Model) applyUpdate() tea.Cmd {
+	return func() tea.Msg {
+		client := update.NewClient()
+		opts := update.ApplyOptions{
+			CurrentVersion: Version,
+			Yes:            true, // Skip confirmation in TUI
+			Insecure:       false,
+			DryRun:         false,
+		}
+
+		result, err := client.Apply(opts)
+		return updateApplyMsg{result: result, err: err}
 	}
 }
 
@@ -698,8 +745,13 @@ func (m Model) handleUpdateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, m.checkUpdates()
 	case "u":
-		// Update commander (placeholder)
-		m.status = "Commander self-update not yet implemented"
+		// Apply Commander update
+		if m.updateData != nil && m.updateData.CommanderUpdate {
+			m.loading = true
+			m.status = "Updating Commander..."
+			return m, m.applyUpdate()
+		}
+		m.status = "No update available"
 	}
 	return m, nil
 }
