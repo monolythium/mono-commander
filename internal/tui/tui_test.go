@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/monolythium/mono-commander/internal/core"
+	"github.com/monolythium/mono-commander/internal/update"
 )
 
 func TestNewModel(t *testing.T) {
@@ -891,6 +892,52 @@ func TestScrollHint(t *testing.T) {
 	hint = ScrollHint(false, false)
 	if hint == "" {
 		t.Error("ScrollHint(false, false) returned empty string")
+	}
+}
+
+// Test update message formatting (M7 UX fix)
+func TestModel_UpdateApplyMessage(t *testing.T) {
+	tests := []struct {
+		name       string
+		newVersion string
+		wantMsg    string
+	}{
+		{
+			name:       "with version",
+			newVersion: "v1.2.0",
+			wantMsg:    "Updated to v1.2.0. Please restart monoctl.",
+		},
+		{
+			name:       "empty version",
+			newVersion: "",
+			wantMsg:    "Update installed. Please restart monoctl.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewModel()
+			m.width = 80
+			m.height = 24
+
+			// Simulate receiving an updateApplyMsg with success
+			result := &update.ApplyResult{
+				Success:    true,
+				NewVersion: tt.newVersion,
+			}
+			msg := updateApplyMsg{result: result, err: nil}
+
+			newModel, _ := m.Update(msg)
+			resultModel := newModel.(Model)
+
+			if resultModel.status != tt.wantMsg {
+				t.Errorf("status = %q, want %q", resultModel.status, tt.wantMsg)
+			}
+
+			if resultModel.err != nil {
+				t.Errorf("err should be nil, got %v", resultModel.err)
+			}
+		})
 	}
 }
 
