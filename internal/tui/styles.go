@@ -3,16 +3,35 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Theme colors - semantic color palette
+// Terminal capability detection
 var (
+	// HasTrueColor indicates if terminal supports true color (24-bit)
+	HasTrueColor = detectTrueColor()
+)
+
+// detectTrueColor checks if terminal supports true color
+func detectTrueColor() bool {
+	colorTerm := os.Getenv("COLORTERM")
+	return colorTerm == "truecolor" || colorTerm == "24bit"
+}
+
+// Theme colors - premium Monolythium palette
+var (
+	// Brand colors (gradient-like for monolith feel)
+	ColorBrand       = lipgloss.Color("99")  // Primary purple (Monolythium accent)
+	ColorBrandBright = lipgloss.Color("141") // Lighter purple
+	ColorBrandDim    = lipgloss.Color("61")  // Darker purple
+
 	// Base colors
 	ColorBg        = lipgloss.Color("235") // Dark background
 	ColorBgCard    = lipgloss.Color("236") // Slightly lighter for cards
+	ColorBgHeader  = lipgloss.Color("234") // Darker for header
 	ColorBorder    = lipgloss.Color("238") // Subtle border
 	ColorBorderFoc = lipgloss.Color("99")  // Focused border (accent)
 
@@ -58,21 +77,34 @@ var (
 	TextInfo = lipgloss.NewStyle().Foreground(ColorInfo)
 )
 
-// Tab bar styles
+// Tab bar styles - premium outlined design
 var (
+	// Inactive tab: simple text
 	TabInactive = lipgloss.NewStyle().
 			Padding(0, 2).
 			Foreground(ColorMuted)
 
+	// Active tab: outlined box with accent border
 	TabActive = lipgloss.NewStyle().
 			Padding(0, 2).
 			Bold(true).
 			Foreground(ColorBright).
-			Background(lipgloss.Color("237"))
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBrand).
+			BorderTop(true).
+			BorderBottom(true).
+			BorderLeft(true).
+			BorderRight(true)
 
-	TabBarDivider = lipgloss.NewStyle().
-			Foreground(ColorBorder).
-			SetString(strings.Repeat("─", 100))
+	// Tab bar container
+	TabBarContainer = lipgloss.NewStyle().
+				PaddingLeft(1).
+				MarginTop(0).
+				MarginBottom(0)
+
+	// Tab bar bottom border
+	TabBarBorder = lipgloss.NewStyle().
+			Foreground(ColorBorder)
 )
 
 // Card styles
@@ -108,6 +140,107 @@ var (
 			Foreground(ColorBright).
 			MarginBottom(1)
 )
+
+// Branding header bar styles
+var (
+	// Monolith icon (ASCII art representation)
+	MonolithIcon = "◆"
+
+	// Brand title style
+	BrandTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorBrand).
+			PaddingRight(1)
+
+	// Commander text style
+	CommanderStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorBright)
+
+	// Network badge style
+	NetworkBadgeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("235")).
+				Background(ColorBrand).
+				Padding(0, 1).
+				Bold(true)
+
+	// Version badge style
+	VersionBadgeStyle = lipgloss.NewStyle().
+				Foreground(ColorMuted).
+				Background(lipgloss.Color("238")).
+				Padding(0, 1)
+
+	// Header bar container
+	HeaderBarStyle = lipgloss.NewStyle().
+			Background(ColorBgHeader).
+			Padding(0, 1).
+			MarginBottom(0)
+
+	// Header info style (chain-id, height, etc.)
+	HeaderInfoStyle = lipgloss.NewStyle().
+			Foreground(ColorMuted)
+
+	// Header value style
+	HeaderValueStyle = lipgloss.NewStyle().
+				Foreground(ColorBright)
+)
+
+// RenderBrandingHeader renders the top branding header bar
+func RenderBrandingHeader(network, chainID string, height int64, version string, updateOK bool, width int) string {
+	// Left side: MONO COMMANDER with icon
+	icon := BrandTitleStyle.Render(MonolithIcon)
+	title := CommanderStyle.Render("MONO COMMANDER")
+	leftContent := icon + " " + title
+
+	// Center: Network badge + chain info
+	networkBadge := NetworkBadgeStyle.Render(strings.ToUpper(network))
+
+	chainInfo := ""
+	if chainID != "" {
+		chainInfo += HeaderInfoStyle.Render(" · ") + HeaderValueStyle.Render(chainID)
+	}
+	if height > 0 {
+		chainInfo += HeaderInfoStyle.Render(" · H:") + HeaderValueStyle.Render(fmt.Sprintf("%d", height))
+	}
+
+	centerContent := networkBadge + chainInfo
+
+	// Right side: Version badge + update status
+	versionBadge := VersionBadgeStyle.Render("v" + version)
+	var statusBadge string
+	if updateOK {
+		statusBadge = " " + Badge(BadgeOK, "")
+	} else {
+		statusBadge = " " + Badge(BadgeWarn, "UPDATE")
+	}
+	rightContent := versionBadge + statusBadge
+
+	// Calculate spacing
+	leftWidth := lipgloss.Width(leftContent)
+	centerWidth := lipgloss.Width(centerContent)
+	rightWidth := lipgloss.Width(rightContent)
+
+	// Calculate gaps
+	totalContentWidth := leftWidth + centerWidth + rightWidth
+	remainingSpace := width - totalContentWidth - 4 // 4 for padding
+
+	if remainingSpace < 0 {
+		remainingSpace = 0
+	}
+
+	leftGap := remainingSpace / 2
+	rightGap := remainingSpace - leftGap
+
+	// Build header line
+	header := leftContent +
+		strings.Repeat(" ", leftGap) +
+		centerContent +
+		strings.Repeat(" ", rightGap) +
+		rightContent
+
+	// Apply header bar style
+	return HeaderBarStyle.Width(width).Render(header)
+}
 
 // Badge styles for status indicators
 type BadgeType int
@@ -401,16 +534,17 @@ type TabPosition struct {
 func RenderTabBar(tabs []Tab, activeTab Tab, width int) (string, TabPositions) {
 	var renderedTabs []string
 	var positions TabPositions
-	currentX := 0
+	currentX := 1 // Start at 1 for left padding
 
 	for _, t := range tabs {
-		var style lipgloss.Style
+		var rendered string
 		if t == activeTab {
-			style = TabActive
+			// Active tab with outlined box
+			rendered = TabActive.Render(t.String())
 		} else {
-			style = TabInactive
+			// Inactive tab as plain text
+			rendered = TabInactive.Render(t.String())
 		}
-		rendered := style.Render(t.String())
 		renderedWidth := lipgloss.Width(rendered)
 
 		positions.Tabs = append(positions.Tabs, TabPosition{
@@ -423,8 +557,8 @@ func RenderTabBar(tabs []Tab, activeTab Tab, width int) (string, TabPositions) {
 		renderedTabs = append(renderedTabs, rendered)
 	}
 
-	tabBar := strings.Join(renderedTabs, " ")
-	divider := Divider(width)
+	tabBar := TabBarContainer.Render(strings.Join(renderedTabs, " "))
+	divider := TabBarBorder.Render(strings.Repeat("─", width))
 
 	return tabBar + "\n" + divider, positions
 }
@@ -447,6 +581,48 @@ func ActionBar(hints []string, width int) string {
 		Align(lipgloss.Center)
 
 	return style.Render(strings.Join(hints, "  •  "))
+}
+
+// StatusBar styles
+var (
+	StatusBarStyle = lipgloss.NewStyle().
+			Background(ColorBgHeader).
+			Foreground(ColorMuted).
+			Padding(0, 1)
+
+	StatusBarLeftStyle = lipgloss.NewStyle().
+				Foreground(ColorMuted)
+
+	StatusBarRightStyle = lipgloss.NewStyle().
+				Foreground(ColorMuted)
+)
+
+// RenderStatusBar renders a premium status bar footer
+func RenderStatusBar(leftContent, centerHints, rightContent string, width int) string {
+	// Calculate widths
+	leftWidth := lipgloss.Width(leftContent)
+	centerWidth := lipgloss.Width(centerHints)
+	rightWidth := lipgloss.Width(rightContent)
+
+	// Calculate gaps for centering
+	totalContentWidth := leftWidth + centerWidth + rightWidth
+	remainingSpace := width - totalContentWidth - 4
+
+	if remainingSpace < 0 {
+		remainingSpace = 0
+	}
+
+	leftGap := remainingSpace / 2
+	rightGap := remainingSpace - leftGap
+
+	// Build status bar
+	bar := StatusBarLeftStyle.Render(leftContent) +
+		strings.Repeat(" ", leftGap) +
+		centerHints +
+		strings.Repeat(" ", rightGap) +
+		StatusBarRightStyle.Render(rightContent)
+
+	return StatusBarStyle.Width(width).Render(bar)
 }
 
 // PageHeader renders a page header with title and optional subtitle

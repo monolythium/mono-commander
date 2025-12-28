@@ -15,13 +15,34 @@ func (m Model) View() string {
 
 	var b strings.Builder
 
+	// Get current state for branding header
+	chainID := ""
+	height := int64(0)
+	if m.dashboardData != nil && m.dashboardData.NodeStatus != nil {
+		chainID = m.dashboardData.NodeStatus.ChainID
+		height = m.dashboardData.NodeStatus.LatestHeight
+	}
+	updateOK := m.updateData == nil || !m.updateData.CommanderUpdate
+
+	// Render branding header bar
+	brandHeader := RenderBrandingHeader(
+		string(m.selectedNetwork),
+		chainID,
+		height,
+		Version,
+		updateOK,
+		m.width,
+	)
+	b.WriteString(brandHeader)
+	b.WriteString("\n")
+
 	// Render tab bar with positions for mouse detection
 	tabBar, _ := RenderTabBar(m.tabs, m.activeTab, m.width)
 	b.WriteString(tabBar)
 	b.WriteString("\n")
 
-	// Calculate content height (total - tab bar - footer)
-	contentHeight := m.height - 6
+	// Calculate content height (total - header - tab bar - status bar - footer)
+	contentHeight := m.height - 8
 
 	// Render tab content
 	var content string
@@ -46,61 +67,67 @@ func (m Model) View() string {
 		MaxHeight(contentHeight)
 	b.WriteString(contentStyle.Render(content))
 
-	// Render status line
+	// Build status messages
+	statusLeft := ""
 	if m.status != "" {
-		b.WriteString("\n")
-		b.WriteString(TextMuted.MarginLeft(2).Render(m.status))
+		statusLeft = m.status
 	}
-
-	// Render error if any
 	if m.err != nil {
-		b.WriteString("\n")
-		b.WriteString(TextDanger.MarginLeft(2).Render("Error: " + m.err.Error()))
+		statusLeft = TextDanger.Render("Error: " + m.err.Error())
 	}
 
-	// Render help footer
+	// Render premium status bar footer
 	b.WriteString("\n")
-	b.WriteString(m.renderHelpFooter())
+	b.WriteString(m.renderPremiumFooter(statusLeft))
 
 	return b.String()
 }
 
-func (m Model) renderHelpFooter() string {
+func (m Model) renderPremiumFooter(statusMsg string) string {
+	// Left: status message or tab name
+	leftContent := statusMsg
+	if leftContent == "" {
+		leftContent = TextMuted.Render(m.activeTab.String())
+	}
+
+	// Center: key hints
+	hints := m.getContextualHints()
+	centerHints := strings.Join(hints, "  ")
+
+	// Right: escape hint if in subview, otherwise quit hint
+	rightContent := KeyHint("q", "quit")
+	if m.subView != SubViewNone {
+		rightContent = KeyHint("Esc", "back") + "  " + rightContent
+	}
+
+	return RenderStatusBar(leftContent, centerHints, rightContent, m.width)
+}
+
+func (m Model) getContextualHints() []string {
 	var hints []string
 
 	// Common navigation hints
-	hints = append(hints, KeyHint("Tab", "switch"))
-	hints = append(hints, KeyHint("←→", "tabs"))
+	hints = append(hints, KeyHint("Tab", "switch"), KeyHint("←→", "nav"))
 
 	// Tab-specific hints
 	switch m.activeTab {
 	case TabDashboard:
-		hints = append(hints, KeyHint("n", "network"))
-		hints = append(hints, KeyHint("r", "refresh"))
+		hints = append(hints, KeyHint("n", "network"), KeyHint("r", "refresh"))
 	case TabHealth:
-		hints = append(hints, KeyHint("r", "refresh"))
-		hints = append(hints, KeyHint("1/2/3", "section"))
+		hints = append(hints, KeyHint("r", "refresh"), KeyHint("1/2/3", "section"))
 	case TabLogs:
-		hints = append(hints, KeyHint("c", "config"))
-		hints = append(hints, KeyHint("s", "stream"))
-		hints = append(hints, KeyHint("f", "follow"))
+		hints = append(hints, KeyHint("c", "config"), KeyHint("s", "stream"))
 	case TabUpdate:
-		hints = append(hints, KeyHint("r", "check"))
-		hints = append(hints, KeyHint("u", "update"))
+		hints = append(hints, KeyHint("r", "check"), KeyHint("u", "update"))
 	case TabInstall:
 		hints = append(hints, KeyHint("1-4", "steps"))
 	case TabHelp:
 		hints = append(hints, KeyHint("↑↓", "scroll"))
 	}
 
-	hints = append(hints, KeyHint("q", "quit"))
-
-	if m.subView != SubViewNone {
-		hints = append([]string{KeyHint("Esc", "back")}, hints...)
-	}
-
-	return ActionBar(hints, m.width)
+	return hints
 }
+
 
 // Dashboard rendering with cards layout
 func (m Model) renderDashboard() string {
@@ -713,73 +740,128 @@ func (m Model) renderHelpContent() string {
 		cardWidth = 70
 	}
 
-	// What is Commander
-	whatIs := `Mono Commander is a TUI-first tool for installing and operating
-Monolythium nodes across Localnet, Sprintnet, Testnet, and Mainnet.
+	// Premium hero section
+	heroIcon := BrandTitleStyle.Render("◆")
+	heroTitle := lipgloss.NewStyle().Bold(true).Foreground(ColorBright).Render("MONO COMMANDER")
+	heroSubtitle := TextMuted.Render("TUI-first node operations for Monolythium")
+	heroVersion := VersionBadgeStyle.Render("v" + Version)
 
-It provides a unified interface for node operators to manage their
-infrastructure with safety constraints and best practices built-in.`
-	b.WriteString(Card("What is Mono Commander?", whatIs, cardWidth))
+	heroContent := heroIcon + " " + heroTitle + "  " + heroVersion + "\n\n" + heroSubtitle
+	heroStyle := lipgloss.NewStyle().
+		Width(cardWidth).
+		Align(lipgloss.Center).
+		Padding(1, 2).
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(ColorBrand)
+	b.WriteString(heroStyle.Render(heroContent))
 	b.WriteString("\n\n")
 
-	// Safety Constraints
-	safety := `• ` + TextDanger.Render("No secrets stored") + `: Commander never stores mnemonics, private keys, or tokens
-• ` + TextWarning.Render("No key generation") + `: Key management is handled by the node binary
-• ` + TextWarning.Render("No rollback") + `: Emergency recovery is HALT → PATCH → UPGRADE → RESTART
-• ` + TextSuccess.Render("Dry-run recommended") + `: Always preview changes before applying`
-	b.WriteString(Card("Safety Constraints", safety, cardWidth))
+	// Features grid (two columns if space allows)
+	halfWidth := (cardWidth - 4) / 2
+	if halfWidth < 30 {
+		halfWidth = cardWidth
+	}
+
+	// Feature: Networks
+	networksBody := TextSuccess.Render("●") + " Localnet  " +
+		TextInfo.Render("●") + " Sprintnet\n" +
+		TextWarning.Render("●") + " Testnet   " +
+		TextDanger.Render("●") + " Mainnet"
+	networksCard := Card("Supported Networks", networksBody, halfWidth)
+
+	// Feature: Operations
+	opsBody := "• Install & configure nodes\n• Real-time health monitoring\n• Log streaming & filtering\n• Self-updating binaries"
+	opsCard := Card("Core Operations", opsBody, halfWidth)
+
+	if halfWidth < cardWidth {
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, networksCard, "  ", opsCard))
+	} else {
+		b.WriteString(networksCard)
+		b.WriteString("\n")
+		b.WriteString(opsCard)
+	}
 	b.WriteString("\n\n")
 
-	// Keyboard Shortcuts
-	shortcuts := [][]string{
-		{"Tab / Shift+Tab", "Switch between tabs"},
-		{"← / →", "Navigate tabs"},
+	// Safety Constraints - highlighted box
+	safetyItems := []string{
+		TextDanger.Render("✗") + " No secrets stored – Commander never stores mnemonics or keys",
+		TextDanger.Render("✗") + " No key generation – Key management is node binary only",
+		TextWarning.Render("!") + " No rollback – Recovery is HALT → PATCH → UPGRADE → RESTART",
+		TextSuccess.Render("✓") + " Dry-run recommended – Always preview before applying",
+	}
+	safetyBody := strings.Join(safetyItems, "\n")
+	safetyStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorWarning).
+		Padding(1, 2).
+		Width(cardWidth)
+	safetyTitle := TextWarning.Bold(true).Render("⚠ Safety Constraints")
+	b.WriteString(safetyStyle.Render(safetyTitle + "\n\n" + safetyBody))
+	b.WriteString("\n\n")
+
+	// Keyboard shortcuts in a compact table
+	shortcutsBody := ""
+	shortcuts := []struct {
+		key  string
+		desc string
+	}{
+		{"Tab / ←→", "Switch tabs"},
 		{"Enter", "Select / Confirm"},
 		{"Esc", "Go back / Cancel"},
 		{"r", "Refresh current view"},
-		{"q", "Quit"},
+		{"q", "Quit Commander"},
 	}
-	shortcutsBody := Table(shortcuts, 0)
-	shortcutsBody += "\n" + TextMuted.Render("Tab-specific:") + "\n"
-	shortcutsBody += "  Dashboard: " + TextAction.Render("n") + " = change network\n"
-	shortcutsBody += "  Health: " + TextAction.Render("1/2/3") + " = section details\n"
-	shortcutsBody += "  Logs: " + TextAction.Render("c") + " = config, " + TextAction.Render("s") + " = stream, " + TextAction.Render("f") + " = follow\n"
-	shortcutsBody += "  Update: " + TextAction.Render("u") + " = update commander\n"
-	shortcutsBody += "  Install: " + TextAction.Render("1/2/3/4") + " = wizard steps\n"
+	for _, s := range shortcuts {
+		shortcutsBody += fmt.Sprintf("  %s  %s\n",
+			TextAction.Render(fmt.Sprintf("%-10s", s.key)),
+			TextNormal.Render(s.desc))
+	}
+	shortcutsBody += "\n" + TextMuted.Render("Tab-specific shortcuts:") + "\n"
+	shortcutsBody += "  " + TextAction.Render("n") + " network  " +
+		TextAction.Render("c") + " config  " +
+		TextAction.Render("s") + " stream  " +
+		TextAction.Render("u") + " update  " +
+		TextAction.Render("1-4") + " steps"
 	b.WriteString(Card("Keyboard Shortcuts", shortcutsBody, cardWidth))
 	b.WriteString("\n\n")
 
-	// Mouse Support
-	mouse := `• Click on tabs to switch
-• Scroll wheel to navigate viewports
-• Works alongside keyboard controls`
-	b.WriteString(Card("Mouse Support", mouse, cardWidth))
+	// Mouse support - compact
+	mouseBody := "• " + TextBright.Render("Click") + " tabs to switch\n" +
+		"• " + TextBright.Render("Scroll") + " wheel for viewports\n" +
+		"• Works with keyboard controls"
+	mouseCard := Card("Mouse Support", mouseBody, halfWidth)
+
+	// Quick help
+	quickBody := "• Run " + TextAction.Render("monoctl --help") + " for CLI\n" +
+		"• Press " + TextAction.Render("?") + " anywhere for hints\n" +
+		"• " + TextAction.Render("r") + " to refresh data"
+	quickCard := Card("Quick Tips", quickBody, halfWidth)
+
+	if halfWidth < cardWidth {
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, mouseCard, "  ", quickCard))
+	} else {
+		b.WriteString(mouseCard)
+		b.WriteString("\n")
+		b.WriteString(quickCard)
+	}
 	b.WriteString("\n\n")
 
-	// Troubleshooting
-	troubleshooting := TextMuted.Render("RPC unreachable:") + `
-  • Check if the node is running: systemctl status monod
-  • Verify the node is listening on expected ports
-
-` + TextMuted.Render("Wrong chain-id / EVM chain-id:") + `
-  • Ensure you're connected to the correct network
-  • Check genesis.json matches the expected network
-
-` + TextMuted.Render("Systemd not present:") + `
-  • Systemd is required for service management on Linux
-  • On macOS, use launchd or run manually
-
-` + TextMuted.Render("Ports in use:") + `
-  • Stop conflicting services: lsof -i :26657
-  • Use different ports in config.toml`
-	b.WriteString(Card("Troubleshooting", troubleshooting, cardWidth))
+	// Troubleshooting - collapsible style
+	troubleItems := []string{
+		TextMuted.Render("RPC unreachable?") + " → systemctl status monod",
+		TextMuted.Render("Wrong chain-id?") + " → Check genesis.json",
+		TextMuted.Render("Ports in use?") + " → lsof -i :26657",
+		TextMuted.Render("Need systemd?") + " → Required on Linux only",
+	}
+	troubleBody := strings.Join(troubleItems, "\n")
+	b.WriteString(Card("Troubleshooting", troubleBody, cardWidth))
 	b.WriteString("\n\n")
 
-	// Links
-	links := `• GitHub: https://github.com/monolythium/mono-commander
-• Docs: https://docs.monolythium.com
-• Issues: https://github.com/monolythium/mono-commander/issues`
-	b.WriteString(Card("Documentation", links, cardWidth))
+	// Links footer
+	linksBody := TextInfo.Render("GitHub") + "  github.com/monolythium/mono-commander\n" +
+		TextInfo.Render("Docs") + "    docs.monolythium.com\n" +
+		TextInfo.Render("Issues") + "  github.com/monolythium/mono-commander/issues"
+	b.WriteString(Card("Resources", linksBody, cardWidth))
 
 	return b.String()
 }
