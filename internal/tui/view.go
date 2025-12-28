@@ -80,8 +80,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.renderPremiumFooter(statusLeft))
 
-	// Apply app-wide background canvas
-	return RenderAppBackground(b.String(), m.width, m.height)
+	return b.String()
 }
 
 func (m Model) renderPremiumFooter(statusMsg string) string {
