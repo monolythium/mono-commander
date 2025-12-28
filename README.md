@@ -333,4 +333,10 @@ go build -ldflags "-X github.com/monolythium/mono-commander/internal/tui.Version
 
 ## License
 
-Apache 2.0
+Mono Commander is source-available under the [Business Source License 1.1](LICENSE).
+
+- **Non-production use** is permitted (evaluation, personal, educational, internal)
+- **Production use** as part of a competing product or service requires a commercial license
+- On the Change Date (2029-01-01), the license converts to Apache-2.0
+
+See [LICENSE](LICENSE) for full terms.
