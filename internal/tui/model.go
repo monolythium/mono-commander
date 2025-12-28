@@ -153,36 +153,38 @@ func (i MenuItem) FilterValue() string { return i.title }
 // Model is the Bubble Tea model
 type Model struct {
 	// Tab navigation
-	activeTab Tab
-	tabs      []Tab
+	activeTab    Tab
+	tabs         []Tab
+	tabPositions TabPositions
 
 	// Screen dimensions
 	width  int
 	height int
 
 	// User config
-	config         *Config
+	config          *Config
 	selectedNetwork core.NetworkName
-	networks       []core.Network
+	networks        []core.Network
 
 	// Shared components
-	list     list.Model
-	spinner  spinner.Model
-	viewport viewport.Model
+	list         list.Model
+	spinner      spinner.Model
+	viewport     viewport.Model
+	helpViewport viewport.Model
 
 	// Form state
-	formFields    []FormField
-	formIndex     int
-	formResult    map[string]string
-	formCallback  func(Model, map[string]string) (Model, tea.Cmd)
+	formFields   []FormField
+	formIndex    int
+	formResult   map[string]string
+	formCallback func(Model, map[string]string) (Model, tea.Cmd)
 
 	// Current subview
 	subView SubView
 
 	// Status/loading state
-	status    string
-	loading   bool
-	err       error
+	status  string
+	loading bool
+	err     error
 
 	// Dashboard state
 	dashboardData *DashboardData
@@ -320,57 +322,18 @@ type InstallData struct {
 	MeshInstalled bool
 }
 
-// Styles
+// Legacy style aliases for backward compatibility
 var (
-	// Tab bar styles
-	tabStyle = lipgloss.NewStyle().
-			Padding(0, 2).
-			Foreground(lipgloss.Color("241"))
-
-	activeTabStyle = lipgloss.NewStyle().
-			Padding(0, 2).
-			Bold(true).
-			Foreground(lipgloss.Color("99")).
-			Background(lipgloss.Color("236"))
-
-	tabBarStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderForeground(lipgloss.Color("240"))
-
-	// Content styles
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("99")).
-			MarginLeft(2)
-
-	statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			MarginLeft(2)
-
-	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-
-	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	blurredStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-
-	warningStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208"))
-
-	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82"))
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-
-	boxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Padding(1, 2)
-
-	sectionStyle = lipgloss.NewStyle().
-			MarginTop(1).
-			MarginBottom(1)
+	titleStyle   = HeaderStyle
+	statusStyle  = TextMuted.Copy().MarginLeft(2)
+	helpStyle    = TextMuted
+	focusedStyle = TextAction
+	blurredStyle = TextMuted
+	warningStyle = TextWarning
+	successStyle = TextSuccess
+	errorStyle   = TextDanger
+	boxStyle     = CardStyle
+	sectionStyle = lipgloss.NewStyle().MarginTop(1).MarginBottom(1)
 )
 
 // NewModel creates a new TUI model

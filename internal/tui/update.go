@@ -68,13 +68,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.list.SetSize(msg.Width-4, msg.Height-10)
+
+		viewportHeight := msg.Height - 10
+		if viewportHeight < 5 {
+			viewportHeight = 5
+		}
+
+		// Initialize or resize logs viewport
 		if m.viewport.Width == 0 {
-			m.viewport = NewViewport(msg.Width-4, msg.Height-10)
+			m.viewport = NewViewport(msg.Width-4, viewportHeight)
 		} else {
 			m.viewport.Width = msg.Width - 4
-			m.viewport.Height = msg.Height - 10
+			m.viewport.Height = viewportHeight
 		}
+
+		// Initialize or resize help viewport
+		if m.helpViewport.Width == 0 {
+			m.helpViewport = NewViewport(msg.Width-4, viewportHeight)
+			m.helpViewport.SetContent(m.renderHelpContent())
+		} else {
+			m.helpViewport.Width = msg.Width - 4
+			m.helpViewport.Height = viewportHeight
+		}
+
 		return m, nil
+
+	case tea.MouseMsg:
+		return m.handleMouseEvent(msg)
 
 	case tea.KeyMsg:
 		return m.handleKeypress(msg)
@@ -875,6 +895,56 @@ func (m Model) setupMeshInstallForm() Model {
 }
 
 func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// No special key handling for help tab
+	// Handle scroll keys in help tab
+	switch msg.String() {
+	case "up", "k":
+		m.helpViewport.LineUp(1)
+	case "down", "j":
+		m.helpViewport.LineDown(1)
+	case "pgup":
+		m.helpViewport.HalfViewUp()
+	case "pgdown", " ":
+		m.helpViewport.HalfViewDown()
+	case "home":
+		m.helpViewport.GotoTop()
+	case "end":
+		m.helpViewport.GotoBottom()
+	}
+	return m, nil
+}
+
+// handleMouseEvent handles mouse events for tab switching and scrolling
+func (m Model) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.MouseLeft:
+		// Check if click is in the tab bar area (first 2 lines)
+		if msg.Y < 2 {
+			// Calculate which tab was clicked
+			_, positions := RenderTabBar(m.tabs, m.activeTab, m.width)
+			clickedTab := positions.GetTabAtPosition(msg.X)
+			if clickedTab >= 0 && clickedTab < Tab(len(m.tabs)) {
+				m.activeTab = clickedTab
+				m.subView = SubViewNone
+				return m, m.onTabChange()
+			}
+		}
+
+	case tea.MouseWheelUp:
+		// Scroll up in appropriate viewport
+		if m.activeTab == TabHelp {
+			m.helpViewport.LineUp(3)
+		} else if m.activeTab == TabLogs && m.subView == SubViewLogsViewer {
+			m.viewport.LineUp(3)
+		}
+
+	case tea.MouseWheelDown:
+		// Scroll down in appropriate viewport
+		if m.activeTab == TabHelp {
+			m.helpViewport.LineDown(3)
+		} else if m.activeTab == TabLogs && m.subView == SubViewLogsViewer {
+			m.viewport.LineDown(3)
+		}
+	}
+
 	return m, nil
 }

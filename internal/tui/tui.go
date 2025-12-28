@@ -7,7 +7,11 @@ import (
 
 // Run starts the TUI application
 func Run() error {
-	p := tea.NewProgram(NewModel(), tea.WithAltScreen())
+	p := tea.NewProgram(
+		NewModel(),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(), // Enable mouse support
+	)
 	_, err := p.Run()
 	return err
 }
