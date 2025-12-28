@@ -80,7 +80,8 @@ func (m Model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.renderPremiumFooter(statusLeft))
 
-	return b.String()
+	// Apply app-wide background canvas
+	return RenderAppBackground(b.String(), m.width, m.height)
 }
 
 func (m Model) renderPremiumFooter(statusMsg string) string {
@@ -238,7 +239,8 @@ func (m Model) renderNetworkCard(width int) string {
 	}
 
 	body := Table(rows, 0)
-	return Card("Network", body, width)
+	// Use gradient border for primary dashboard cards
+	return GradientCard("Network", body, width)
 }
 
 func (m Model) renderInstallStatusCard(width int) string {
@@ -253,7 +255,8 @@ func (m Model) renderInstallStatusCard(width int) string {
 	}
 
 	body := StatusTable(rows, 0)
-	return Card("Installation Status", body, width)
+	// Use gradient border for primary dashboard cards
+	return GradientCard("Installation Status", body, width)
 }
 
 func (m Model) renderNodeStatusCard(width int) string {
@@ -275,7 +278,8 @@ func (m Model) renderNodeStatusCard(width int) string {
 	}
 
 	body := Table(rows, 0)
-	return Card("Node Status", body, width)
+	// Use gradient border for primary dashboard cards
+	return GradientCard("Node Status", body, width)
 }
 
 // Health rendering with semantic colors
@@ -391,7 +395,8 @@ func (m Model) renderSystemHealthCard(width int) string {
 		}
 	}
 
-	return Card("[1] System Requirements", body, width)
+	// Use gradient border for primary health cards
+	return GradientCard("[1] System Requirements", body, width)
 }
 
 func (m Model) renderNodeHealthCard(width int) string {
@@ -436,7 +441,8 @@ func (m Model) renderNodeHealthCard(width int) string {
 		)
 	}
 
-	return Card("[2] Node Health", body, width)
+	// Use gradient border for primary health cards
+	return GradientCard("[2] Node Health", body, width)
 }
 
 func (m Model) renderMultiNodeCard(width int) string {
@@ -461,7 +467,8 @@ func (m Model) renderValidatorHealthCard(width int) string {
 
 	if h.NotConfigured {
 		body := TextMuted.Render("Validator not configured (no operator key detected)")
-		return Card("[3] Validator Health", body, width)
+		// Use gradient border for primary health cards
+		return GradientCard("[3] Validator Health", body, width)
 	}
 
 	rows := []StatusRow{
@@ -492,7 +499,8 @@ func (m Model) renderValidatorHealthCard(width int) string {
 	}
 
 	body := StatusTable(rows, 0)
-	return Card("[3] Validator Health", body, width)
+	// Use gradient border for primary health cards
+	return GradientCard("[3] Validator Health", body, width)
 }
 
 // Logs rendering with viewport
