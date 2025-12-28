@@ -16,9 +16,9 @@ type Peer struct {
 
 // PeersRegistry represents a peers.json file.
 type PeersRegistry struct {
-	ChainID      string `json:"chain_id"`
-	GenesisSHA   string `json:"genesis_sha256"`
-	Peers        []Peer `json:"peers"`
+	ChainID         string `json:"chain_id"`
+	GenesisSHA      string `json:"genesis_sha256"`
+	Peers           []Peer `json:"peers"`
 	PersistentPeers []Peer `json:"persistent_peers,omitempty"`
 }
 

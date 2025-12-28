@@ -2,13 +2,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/monolythium/mono-commander/internal/core"
+	"github.com/monolythium/mono-commander/internal/logs"
 	"github.com/monolythium/mono-commander/internal/net"
 	oshelpers "github.com/monolythium/mono-commander/internal/os"
 	"github.com/monolythium/mono-commander/internal/tui"
@@ -85,6 +89,32 @@ Or use CLI commands:
 		Short: "Generate systemd unit file",
 		Run:   runSystemdInstall,
 	}
+
+	// Status command
+	statusCmd = &cobra.Command{
+		Use:   "status",
+		Short: "Show node status",
+		Run:   runStatus,
+	}
+
+	// RPC command
+	rpcCmd = &cobra.Command{
+		Use:   "rpc",
+		Short: "RPC health checks",
+	}
+
+	rpcCheckCmd = &cobra.Command{
+		Use:   "check",
+		Short: "Check RPC endpoint health",
+		Run:   runRPCCheck,
+	}
+
+	// Logs command
+	logsCmd = &cobra.Command{
+		Use:   "logs",
+		Short: "Tail node logs",
+		Run:   runLogs,
+	}
 )
 
 func init() {
@@ -126,6 +156,30 @@ func init() {
 	systemdInstallCmd.MarkFlagRequired("user")
 	systemdCmd.AddCommand(systemdInstallCmd)
 	rootCmd.AddCommand(systemdCmd)
+
+	// Status command flags
+	statusCmd.Flags().String("network", "Localnet", "Network name")
+	statusCmd.Flags().String("home", "", "Node home directory")
+	statusCmd.Flags().String("host", "localhost", "RPC host")
+	statusCmd.Flags().Bool("remote", false, "Use remote endpoints")
+	rootCmd.AddCommand(statusCmd)
+
+	// RPC check command flags
+	rpcCheckCmd.Flags().String("network", "Localnet", "Network name")
+	rpcCheckCmd.Flags().String("host", "localhost", "RPC host")
+	rpcCheckCmd.Flags().Bool("remote", false, "Use remote endpoints")
+	rpcCheckCmd.Flags().String("comet-rpc", "", "Override Comet RPC endpoint")
+	rpcCheckCmd.Flags().String("cosmos-rest", "", "Override Cosmos REST endpoint")
+	rpcCheckCmd.Flags().String("evm-rpc", "", "Override EVM RPC endpoint")
+	rpcCmd.AddCommand(rpcCheckCmd)
+	rootCmd.AddCommand(rpcCmd)
+
+	// Logs command flags
+	logsCmd.Flags().String("network", "Localnet", "Network name")
+	logsCmd.Flags().String("home", "", "Node home directory")
+	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	logsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
+	rootCmd.AddCommand(logsCmd)
 }
 
 func main() {
@@ -383,5 +437,222 @@ func runSystemdInstall(cmd *cobra.Command, args []string) {
 		fmt.Println("--- End ---")
 	} else {
 		fmt.Println(oshelpers.SystemdInstructions(unitPath))
+	}
+}
+
+func runStatus(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	host, _ := cmd.Flags().GetString("host")
+	useRemote, _ := cmd.Flags().GetBool("remote")
+
+	network, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = homeDir + "/.monod"
+	}
+
+	endpoints := resolveEndpoints(string(network), host, useRemote, "", "", "")
+
+	opts := core.StatusOptions{
+		Network:   network,
+		Endpoints: endpoints,
+	}
+
+	status, err := core.GetNodeStatus(opts)
+	if err != nil {
+		if jsonOutput {
+			out := map[string]interface{}{
+				"error": err.Error(),
+			}
+			data, _ := json.MarshalIndent(out, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	// Add service status on Linux
+	status.ServiceStatus = logs.GetSystemdServiceStatus(string(network))
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(status, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	// Human-readable output
+	fmt.Println("Node Status")
+	fmt.Println(strings.Repeat("-", 40))
+	fmt.Printf("Chain ID:      %s\n", status.ChainID)
+	fmt.Printf("Moniker:       %s\n", status.Moniker)
+	fmt.Printf("Version:       %s\n", status.NodeVersion)
+	fmt.Printf("Latest Height: %d\n", status.LatestHeight)
+	fmt.Printf("Catching Up:   %t\n", status.CatchingUp)
+	fmt.Printf("Peers:         %d\n", status.PeersCount)
+	if status.ServiceStatus != "" {
+		fmt.Printf("Service:       %s\n", status.ServiceStatus)
+	}
+}
+
+func runRPCCheck(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	host, _ := cmd.Flags().GetString("host")
+	useRemote, _ := cmd.Flags().GetBool("remote")
+	cometRPC, _ := cmd.Flags().GetString("comet-rpc")
+	cosmosREST, _ := cmd.Flags().GetString("cosmos-rest")
+	evmRPC, _ := cmd.Flags().GetString("evm-rpc")
+
+	network, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	endpoints := resolveEndpoints(string(network), host, useRemote, cometRPC, cosmosREST, evmRPC)
+
+	results := core.CheckRPC(network, endpoints)
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(results, "", "  ")
+		fmt.Println(string(data))
+		if !results.AllPass {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Human-readable output
+	fmt.Printf("RPC Health Check - %s\n", network)
+	fmt.Println(strings.Repeat("-", 50))
+
+	for _, r := range results.Results {
+		status := "[PASS]"
+		if r.Status == "FAIL" {
+			status = "[FAIL]"
+		}
+		fmt.Printf("%s %s (%s)\n", status, r.Type, r.Endpoint)
+		if r.Details != "" {
+			fmt.Printf("       %s\n", r.Details)
+		}
+		if r.Message != "" {
+			fmt.Printf("       Error: %s\n", r.Message)
+		}
+	}
+
+	fmt.Println()
+	if results.AllPass {
+		fmt.Println("All RPC endpoints healthy.")
+	} else {
+		fmt.Println("Some RPC endpoints failed.")
+		os.Exit(1)
+	}
+}
+
+// resolveEndpoints resolves RPC endpoints based on network and options.
+func resolveEndpoints(network, host string, useRemote bool, cometRPC, cosmosREST, evmRPC string) core.Endpoints {
+	var endpoints core.Endpoints
+
+	if useRemote {
+		// Remote endpoints for public networks
+		switch network {
+		case "Sprintnet":
+			endpoints = core.Endpoints{
+				CometRPC:   "https://rpc.sprintnet.monolythium.com",
+				CosmosREST: "https://api.sprintnet.monolythium.com",
+				EVMRPC:     "https://evm.sprintnet.monolythium.com",
+			}
+		case "Testnet":
+			endpoints = core.Endpoints{
+				CometRPC:   "https://rpc.testnet.monolythium.com",
+				CosmosREST: "https://api.testnet.monolythium.com",
+				EVMRPC:     "https://evm.testnet.monolythium.com",
+			}
+		case "Mainnet":
+			endpoints = core.Endpoints{
+				CometRPC:   "https://rpc.monolythium.com",
+				CosmosREST: "https://api.monolythium.com",
+				EVMRPC:     "https://evm.monolythium.com",
+			}
+		default:
+			// Localnet - use local endpoints
+			if host == "" {
+				host = "localhost"
+			}
+			endpoints = core.Endpoints{
+				CometRPC:   fmt.Sprintf("http://%s:26657", host),
+				CosmosREST: fmt.Sprintf("http://%s:1317", host),
+				EVMRPC:     fmt.Sprintf("http://%s:8545", host),
+			}
+		}
+	} else {
+		// Local endpoints
+		if host == "" {
+			host = "localhost"
+		}
+		endpoints = core.Endpoints{
+			CometRPC:   fmt.Sprintf("http://%s:26657", host),
+			CosmosREST: fmt.Sprintf("http://%s:1317", host),
+			EVMRPC:     fmt.Sprintf("http://%s:8545", host),
+		}
+	}
+
+	// Apply overrides
+	if cometRPC != "" {
+		endpoints.CometRPC = cometRPC
+	}
+	if cosmosREST != "" {
+		endpoints.CosmosREST = cosmosREST
+	}
+	if evmRPC != "" {
+		endpoints.EVMRPC = evmRPC
+	}
+
+	return endpoints
+}
+
+func runLogs(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	follow, _ := cmd.Flags().GetBool("follow")
+	lines, _ := cmd.Flags().GetInt("lines")
+
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = homeDir + "/.monod"
+	}
+
+	source, err := logs.GetLogSource(networkStr, home, follow, lines)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer source.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle interrupt
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	linesCh, err := source.Lines(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	for line := range linesCh {
+		fmt.Println(line)
 	}
 }

@@ -32,7 +32,7 @@ var networks = map[NetworkName]Network{
 	NetworkLocalnet: {
 		Name:       NetworkLocalnet,
 		ChainID:    "mono-local-1",
-		EVMChainID: 262145, // 0x40001
+		EVMChainID: 262145,     // 0x40001
 		SeedDNS:    []string{}, // Localnet has no DNS seeds
 		GenesisURL: "",
 		PeersURL:   "",

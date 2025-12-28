@@ -48,22 +48,40 @@ const (
 	ViewJoin
 	ViewPeersUpdate
 	ViewSystemd
+	ViewStatus
+	ViewRPCCheck
+	ViewLogs
 )
 
 // Model is the Bubble Tea model
 type Model struct {
-	list       list.Model
+	list        list.Model
 	currentView View
-	width      int
-	height     int
-	status     string
-	networks   []core.Network
-	err        error
+	width       int
+	height      int
+	status      string
+	networks    []core.Network
+	err         error
 }
 
 // NewModel creates a new TUI model
 func NewModel() Model {
 	items := []list.Item{
+		MenuItem{
+			title:       "Status",
+			description: "Check node status",
+			action:      "status",
+		},
+		MenuItem{
+			title:       "RPC Check",
+			description: "Check RPC endpoint health",
+			action:      "rpc-check",
+		},
+		MenuItem{
+			title:       "Logs",
+			description: "Tail node logs",
+			action:      "logs",
+		},
 		MenuItem{
 			title:       "Networks",
 			description: "View supported networks",
@@ -177,6 +195,21 @@ func (m Model) handleAction(action string) (tea.Model, tea.Cmd) {
 		m.status = "Systemd install requires CLI mode. Use: monoctl systemd install --network <network> --user <user>"
 		return m, nil
 
+	case "status":
+		m.currentView = ViewStatus
+		m.status = "Status requires CLI mode. Use: monoctl status --network <network> [--json]"
+		return m, nil
+
+	case "rpc-check":
+		m.currentView = ViewRPCCheck
+		m.status = "RPC check requires CLI mode. Use: monoctl rpc check --network <network> [--json]"
+		return m, nil
+
+	case "logs":
+		m.currentView = ViewLogs
+		m.status = "Logs requires CLI mode. Use: monoctl logs --network <network> [-f] [-n 50]"
+		return m, nil
+
 	case "exit":
 		return m, tea.Quit
 	}
@@ -191,7 +224,7 @@ func (m Model) View() string {
 	switch m.currentView {
 	case ViewNetworks:
 		b.WriteString(m.renderNetworksView())
-	case ViewJoin, ViewPeersUpdate, ViewSystemd:
+	case ViewJoin, ViewPeersUpdate, ViewSystemd, ViewStatus, ViewRPCCheck, ViewLogs:
 		b.WriteString(m.renderActionView())
 	default:
 		b.WriteString(m.list.View())
@@ -244,6 +277,12 @@ func (m Model) renderActionView() string {
 		title = "Update Peers"
 	case ViewSystemd:
 		title = "Systemd Install"
+	case ViewStatus:
+		title = "Node Status"
+	case ViewRPCCheck:
+		title = "RPC Health Check"
+	case ViewLogs:
+		title = "Node Logs"
 	}
 
 	b.WriteString(titleStyle.Render(title))
