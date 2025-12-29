@@ -29,6 +29,7 @@ const (
 	TabLogs
 	TabUpdate
 	TabInstall
+	TabTools
 	TabHelp
 )
 
@@ -44,6 +45,8 @@ func (t Tab) String() string {
 		return "Update"
 	case TabInstall:
 		return "(Re)Install"
+	case TabTools:
+		return "Tools"
 	case TabHelp:
 		return "Help"
 	default:
@@ -53,7 +56,7 @@ func (t Tab) String() string {
 
 // AllTabs returns all available tabs
 func AllTabs() []Tab {
-	return []Tab{TabDashboard, TabHealth, TabLogs, TabUpdate, TabInstall, TabHelp}
+	return []Tab{TabDashboard, TabHealth, TabLogs, TabUpdate, TabInstall, TabTools, TabHelp}
 }
 
 // SubView represents a subview within a tab
@@ -79,6 +82,9 @@ const (
 	SubViewInstallMonod
 	SubViewInstallJoin
 	SubViewInstallMesh
+	// Tools subviews
+	SubViewToolsWalletGen
+	SubViewToolsWalletResult
 	// Forms
 	SubViewForm
 )
@@ -201,6 +207,9 @@ type Model struct {
 	// Install state
 	installData *InstallData
 
+	// Tools state
+	toolsData *ToolsData
+
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -322,6 +331,26 @@ type InstallData struct {
 	MeshInstalled bool
 }
 
+// ToolsData holds tools state including wallet generator
+type ToolsData struct {
+	// Wallet generator state
+	WalletName       string
+	WalletPassword   string
+	WalletConfirm    string
+	WalletGenerating bool
+	WalletResult     *WalletResult
+	WalletError      error
+	// Form field index (0=name, 1=password, 2=confirm)
+	WalletFormIndex  int
+}
+
+// WalletResult holds the result of wallet generation
+type WalletResult struct {
+	KeystorePath  string
+	EVMAddress    string
+	Bech32Address string
+}
+
 // Legacy style aliases for backward compatibility
 var (
 	titleStyle   = HeaderStyle
@@ -381,6 +410,7 @@ func NewModel() Model {
 		logsData:        &LogsData{Lines: 50},
 		updateData:      &UpdateData{CommanderCurrent: Version},
 		installData:     &InstallData{},
+		toolsData:       &ToolsData{},
 	}
 }
 

@@ -2,12 +2,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -18,7 +20,9 @@ import (
 	oshelpers "github.com/monolythium/mono-commander/internal/os"
 	"github.com/monolythium/mono-commander/internal/tui"
 	"github.com/monolythium/mono-commander/internal/update"
+	"github.com/monolythium/mono-commander/internal/walletgen"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // Common flag variables for M4 commands
@@ -263,6 +267,57 @@ Updates are verified using SHA256 checksums from the release.`,
 		Short: "Apply Commander update",
 		Run:   runUpdateApply,
 	}
+
+	// Wallet command group
+	walletCmd = &cobra.Command{
+		Use:   "wallet",
+		Short: "Wallet management commands",
+		Long: `Generate and manage Monolythium wallets.
+
+Wallets are stored as encrypted keystore v3 JSON files in ~/.mono-commander/wallets/
+
+Generate a new wallet:
+  monoctl wallet generate --name my-wallet
+
+List existing wallets:
+  monoctl wallet list
+
+Show wallet info:
+  monoctl wallet info --file <path>`,
+	}
+
+	walletGenerateCmd = &cobra.Command{
+		Use:   "generate",
+		Short: "Generate a new wallet keypair",
+		Long: `Generate a new secp256k1 keypair and save it as an encrypted keystore.
+
+The keystore is encrypted with your password using scrypt KDF and AES-128-CTR.
+By default, the private key is NEVER displayed.
+
+Examples:
+  monoctl wallet generate --name my-wallet
+  monoctl wallet generate --out /custom/path/wallet.json
+  monoctl wallet generate --password-file /path/to/password.txt`,
+		Run: runWalletGenerate,
+	}
+
+	walletListCmd = &cobra.Command{
+		Use:   "list",
+		Short: "List wallet keystore files",
+		Run:   runWalletList,
+	}
+
+	walletInfoCmd = &cobra.Command{
+		Use:   "info",
+		Short: "Show wallet info from keystore file",
+		Long: `Display wallet addresses from a keystore file without decryption.
+
+Shows:
+  - EVM address (0x...)
+  - Bech32 address (mono1...)
+  - Keystore file metadata`,
+		Run: runWalletInfo,
+	}
 )
 
 func init() {
@@ -441,6 +496,23 @@ func init() {
 	updateCmd.AddCommand(updateApplyCmd)
 
 	rootCmd.AddCommand(updateCmd)
+
+	// Wallet commands
+	walletGenerateCmd.Flags().String("name", "", "Wallet name (optional, used in filename)")
+	walletGenerateCmd.Flags().String("out", "", "Output path for keystore file (default: ~/.mono-commander/wallets/)")
+	walletGenerateCmd.Flags().String("password-file", "", "Path to file containing password (alternative to interactive prompt)")
+	walletGenerateCmd.Flags().Bool("show-private-key", false, "Show private key after generation (DANGEROUS)")
+	walletGenerateCmd.Flags().Bool("insecure-show", false, "Required with --show-private-key to confirm understanding")
+	walletCmd.AddCommand(walletGenerateCmd)
+
+	walletListCmd.Flags().String("dir", "", "Directory to list (default: ~/.mono-commander/wallets/)")
+	walletCmd.AddCommand(walletListCmd)
+
+	walletInfoCmd.Flags().String("file", "", "Path to keystore file (required)")
+	walletInfoCmd.MarkFlagRequired("file")
+	walletCmd.AddCommand(walletInfoCmd)
+
+	rootCmd.AddCommand(walletCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -1766,4 +1838,253 @@ func runUpdateApply(cmd *cobra.Command, args []string) {
 			fmt.Println("\nPlease restart monoctl to use the new version.")
 		}
 	}
+}
+
+// =============================================================================
+// Wallet Commands
+// =============================================================================
+
+func runWalletGenerate(cmd *cobra.Command, args []string) {
+	name, _ := cmd.Flags().GetString("name")
+	outPath, _ := cmd.Flags().GetString("out")
+	passwordFile, _ := cmd.Flags().GetString("password-file")
+	showPrivateKey, _ := cmd.Flags().GetBool("show-private-key")
+	insecureShow, _ := cmd.Flags().GetBool("insecure-show")
+
+	// Validate --show-private-key requires --insecure-show
+	if showPrivateKey && !insecureShow {
+		fmt.Fprintln(os.Stderr, "ERROR: --show-private-key requires --insecure-show=true")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "This is a dangerous operation. If you proceed, your private key")
+		fmt.Fprintln(os.Stderr, "will be displayed on screen. Never share your private key with anyone.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "To proceed, run:")
+		fmt.Fprintln(os.Stderr, "  monoctl wallet generate --show-private-key --insecure-show=true")
+		os.Exit(1)
+	}
+
+	// Get password
+	var password string
+	var err error
+
+	if passwordFile != "" {
+		// Read password from file
+		data, err := os.ReadFile(passwordFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password file: %v\n", err)
+			os.Exit(1)
+		}
+		password = strings.TrimSpace(string(data))
+	} else {
+		// Interactive password prompt
+		password, err = promptPassword("Enter password for keystore: ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Confirm password
+		confirm, err := promptPassword("Confirm password: ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			os.Exit(1)
+		}
+
+		if password != confirm {
+			fmt.Fprintln(os.Stderr, "Error: passwords do not match")
+			os.Exit(1)
+		}
+	}
+
+	if len(password) < 8 {
+		fmt.Fprintln(os.Stderr, "Error: password must be at least 8 characters")
+		os.Exit(1)
+	}
+
+	// Generate keypair
+	kp, err := walletgen.GenerateKeypair()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating keypair: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create keystore
+	ks, err := walletgen.CreateKeystore(kp, password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating keystore: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Determine output path
+	if outPath == "" {
+		walletDir, err := walletgen.GetDefaultWalletDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting wallet directory: %v\n", err)
+			os.Exit(1)
+		}
+		filename := walletgen.GenerateKeystoreFilename(name, kp.EVMAddress())
+		outPath = filepath.Join(walletDir, filename)
+	}
+
+	// Save keystore
+	if err := walletgen.SaveKeystore(ks, outPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving keystore: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get addresses
+	evmAddr := kp.EVMAddress()
+	bech32Addr, _ := kp.Bech32Address()
+
+	if jsonOutput {
+		out := map[string]interface{}{
+			"keystore_path":  outPath,
+			"evm_address":    evmAddr,
+			"bech32_address": bech32Addr,
+		}
+		if showPrivateKey && insecureShow {
+			out["private_key"] = kp.PrivateKeyHex()
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	// Human-readable output
+	fmt.Println()
+	fmt.Println("Wallet Generated Successfully")
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Printf("Keystore:       %s\n", outPath)
+	fmt.Printf("EVM Address:    %s\n", evmAddr)
+	fmt.Printf("Bech32 Address: %s\n", bech32Addr)
+
+	if showPrivateKey && insecureShow {
+		fmt.Println()
+		fmt.Println(strings.Repeat("!", 60))
+		fmt.Println("!!! WARNING: PRIVATE KEY BELOW - NEVER SHARE THIS !!!")
+		fmt.Println(strings.Repeat("!", 60))
+		fmt.Printf("Private Key:    %s\n", kp.PrivateKeyHex())
+		fmt.Println(strings.Repeat("!", 60))
+		fmt.Println()
+		fmt.Println("The private key above gives FULL CONTROL over this wallet.")
+		fmt.Println("Store it securely and NEVER share it with anyone.")
+	}
+
+	fmt.Println()
+	fmt.Println("Keep your password safe - it is required to use this wallet.")
+}
+
+func runWalletList(cmd *cobra.Command, args []string) {
+	dir, _ := cmd.Flags().GetString("dir")
+
+	if dir == "" {
+		var err error
+		dir, err = walletgen.GetDefaultWalletDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting wallet directory: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	infos, err := walletgen.ListKeystores(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing keystores: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(infos, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	if len(infos) == 0 {
+		fmt.Printf("No wallets found in %s\n", dir)
+		fmt.Println()
+		fmt.Println("Generate a new wallet with:")
+		fmt.Println("  monoctl wallet generate --name my-wallet")
+		return
+	}
+
+	fmt.Printf("Wallets in %s\n", dir)
+	fmt.Println(strings.Repeat("-", 80))
+	fmt.Printf("%-44s %-48s\n", "EVM ADDRESS", "BECH32 ADDRESS")
+	fmt.Println(strings.Repeat("-", 80))
+
+	for _, info := range infos {
+		fmt.Printf("%-44s %-48s\n", info.EVMAddress, info.Bech32Addr)
+		fmt.Printf("  File: %s (created %s)\n", info.Filename, info.CreatedAt.Format("2006-01-02 15:04"))
+	}
+}
+
+func runWalletInfo(cmd *cobra.Command, args []string) {
+	filePath, _ := cmd.Flags().GetString("file")
+
+	ks, err := walletgen.LoadKeystore(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading keystore: %v\n", err)
+		os.Exit(1)
+	}
+
+	evmAddr := walletgen.GetKeystoreAddress(ks)
+	bech32Addr, _ := walletgen.GetKeystoreBech32Address(ks)
+
+	// Get file info
+	stat, _ := os.Stat(filePath)
+
+	if jsonOutput {
+		out := map[string]interface{}{
+			"file":           filePath,
+			"evm_address":    evmAddr,
+			"bech32_address": bech32Addr,
+			"version":        ks.Version,
+			"id":             ks.ID,
+			"cipher":         ks.Crypto.Cipher,
+			"kdf":            ks.Crypto.KDF,
+		}
+		if stat != nil {
+			out["created_at"] = stat.ModTime()
+			out["size_bytes"] = stat.Size()
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	fmt.Println("Wallet Information")
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Printf("File:           %s\n", filePath)
+	fmt.Printf("EVM Address:    %s\n", evmAddr)
+	fmt.Printf("Bech32 Address: %s\n", bech32Addr)
+	fmt.Printf("Keystore ID:    %s\n", ks.ID)
+	fmt.Printf("Version:        %d\n", ks.Version)
+	fmt.Printf("Cipher:         %s\n", ks.Crypto.Cipher)
+	fmt.Printf("KDF:            %s\n", ks.Crypto.KDF)
+	if stat != nil {
+		fmt.Printf("Created:        %s\n", stat.ModTime().Format("2006-01-02 15:04:05"))
+	}
+}
+
+// promptPassword prompts for a password without echoing
+func promptPassword(prompt string) (string, error) {
+	fmt.Print(prompt)
+
+	// Check if stdin is a terminal
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		// Read password without echo
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println() // Add newline after password input
+		if err != nil {
+			return "", err
+		}
+		return string(password), nil
+	}
+
+	// Fallback for non-terminal (e.g., piped input)
+	reader := bufio.NewReader(os.Stdin)
+	password, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(password), nil
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/monolythium/mono-commander/internal/mesh"
 	"github.com/monolythium/mono-commander/internal/net"
 	"github.com/monolythium/mono-commander/internal/update"
+	"github.com/monolythium/mono-commander/internal/walletgen"
 )
 
 // Messages for async operations
@@ -57,6 +58,11 @@ type networkChangedMsg struct {
 
 type errMsg struct {
 	err error
+}
+
+type walletGeneratedMsg struct {
+	result *WalletResult
+	err    error
 }
 
 // Update handles messages
@@ -180,6 +186,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.config.SelectedNetwork = string(msg.network)
 		SaveConfig(m.config)
 		return m, m.refreshDashboard()
+
+	case walletGeneratedMsg:
+		m.toolsData.WalletGenerating = false
+		if msg.err != nil {
+			m.toolsData.WalletError = msg.err
+		} else {
+			m.toolsData.WalletResult = msg.result
+			m.toolsData.WalletError = nil
+			m.subView = SubViewToolsWalletResult
+			// Clear sensitive data
+			m.toolsData.WalletPassword = ""
+			m.toolsData.WalletConfirm = ""
+		}
+		return m, nil
 	}
 
 	// Update list if in list mode
@@ -261,6 +281,8 @@ func (m Model) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleUpdateKey(msg)
 	case TabInstall:
 		return m.handleInstallKey(msg)
+	case TabTools:
+		return m.handleToolsKey(msg)
 	case TabHelp:
 		return m.handleHelpKey(msg)
 	}
@@ -915,6 +937,171 @@ func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpViewport.GotoBottom()
 	}
 	return m, nil
+}
+
+func (m Model) handleToolsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Handle wallet result view
+	if m.subView == SubViewToolsWalletResult {
+		if key == "esc" || key == "enter" {
+			m.subView = SubViewNone
+			m.toolsData.WalletResult = nil
+			m.toolsData.WalletName = ""
+		}
+		return m, nil
+	}
+
+	// Handle wallet form
+	if m.subView == SubViewToolsWalletGen {
+		return m.handleWalletFormKey(msg)
+	}
+
+	// Main tools view
+	switch key {
+	case "w":
+		// Open wallet generator form
+		m.subView = SubViewToolsWalletGen
+		m.toolsData.WalletFormIndex = 0
+		m.toolsData.WalletName = ""
+		m.toolsData.WalletPassword = ""
+		m.toolsData.WalletConfirm = ""
+		m.toolsData.WalletError = nil
+		m.toolsData.WalletResult = nil
+		return m, nil
+	case "esc":
+		if m.subView != SubViewNone {
+			m.subView = SubViewNone
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleWalletFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "tab", "down":
+		m.toolsData.WalletFormIndex = (m.toolsData.WalletFormIndex + 1) % 3
+		return m, nil
+
+	case "shift+tab", "up":
+		m.toolsData.WalletFormIndex = (m.toolsData.WalletFormIndex - 1 + 3) % 3
+		return m, nil
+
+	case "enter":
+		// Validate and submit
+		if err := m.validateWalletForm(); err != nil {
+			m.toolsData.WalletError = err
+			return m, nil
+		}
+		// Start generation
+		m.toolsData.WalletGenerating = true
+		m.toolsData.WalletError = nil
+		return m, m.generateWallet()
+
+	case "esc":
+		m.subView = SubViewNone
+		m.toolsData.WalletName = ""
+		m.toolsData.WalletPassword = ""
+		m.toolsData.WalletConfirm = ""
+		m.toolsData.WalletError = nil
+		return m, nil
+
+	case "backspace":
+		// Delete character from current field
+		switch m.toolsData.WalletFormIndex {
+		case 0:
+			if len(m.toolsData.WalletName) > 0 {
+				m.toolsData.WalletName = m.toolsData.WalletName[:len(m.toolsData.WalletName)-1]
+			}
+		case 1:
+			if len(m.toolsData.WalletPassword) > 0 {
+				m.toolsData.WalletPassword = m.toolsData.WalletPassword[:len(m.toolsData.WalletPassword)-1]
+			}
+		case 2:
+			if len(m.toolsData.WalletConfirm) > 0 {
+				m.toolsData.WalletConfirm = m.toolsData.WalletConfirm[:len(m.toolsData.WalletConfirm)-1]
+			}
+		}
+		return m, nil
+
+	default:
+		// Type character into current field
+		if len(key) == 1 {
+			r := rune(key[0])
+			if r >= 32 && r < 127 { // Printable ASCII
+				switch m.toolsData.WalletFormIndex {
+				case 0:
+					m.toolsData.WalletName += key
+				case 1:
+					m.toolsData.WalletPassword += key
+				case 2:
+					m.toolsData.WalletConfirm += key
+				}
+			}
+		}
+		return m, nil
+	}
+}
+
+func (m Model) validateWalletForm() error {
+	if len(m.toolsData.WalletPassword) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	if m.toolsData.WalletPassword != m.toolsData.WalletConfirm {
+		return fmt.Errorf("passwords do not match")
+	}
+	return nil
+}
+
+func (m Model) generateWallet() tea.Cmd {
+	name := m.toolsData.WalletName
+	password := m.toolsData.WalletPassword
+
+	return func() tea.Msg {
+		// Generate keypair
+		kp, err := walletgen.GenerateKeypair()
+		if err != nil {
+			return walletGeneratedMsg{err: fmt.Errorf("failed to generate keypair: %w", err)}
+		}
+
+		// Create keystore
+		ks, err := walletgen.CreateKeystore(kp, password)
+		if err != nil {
+			return walletGeneratedMsg{err: fmt.Errorf("failed to create keystore: %w", err)}
+		}
+
+		// Get wallet directory
+		walletDir, err := walletgen.GetDefaultWalletDir()
+		if err != nil {
+			return walletGeneratedMsg{err: fmt.Errorf("failed to get wallet directory: %w", err)}
+		}
+
+		// Generate filename
+		evmAddr := kp.EVMAddress()
+		filename := walletgen.GenerateKeystoreFilename(name, evmAddr)
+		keystorePath := walletDir + "/" + filename
+
+		// Save keystore
+		if err := walletgen.SaveKeystore(ks, keystorePath); err != nil {
+			return walletGeneratedMsg{err: fmt.Errorf("failed to save keystore: %w", err)}
+		}
+
+		// Get bech32 address
+		bech32Addr, err := kp.Bech32Address()
+		if err != nil {
+			bech32Addr = "error: " + err.Error()
+		}
+
+		return walletGeneratedMsg{
+			result: &WalletResult{
+				KeystorePath:  keystorePath,
+				EVMAddress:    evmAddr,
+				Bech32Address: bech32Addr,
+			},
+		}
+	}
 }
 
 // handleMouseEvent handles mouse events for tab switching and scrolling

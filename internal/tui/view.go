@@ -57,6 +57,8 @@ func (m Model) View() string {
 		content = m.renderUpdate()
 	case TabInstall:
 		content = m.renderInstall()
+	case TabTools:
+		content = m.renderTools()
 	case TabHelp:
 		content = m.renderHelp()
 	}
@@ -121,6 +123,8 @@ func (m Model) getContextualHints() []string {
 		hints = append(hints, KeyHint("r", "check"), KeyHint("u", "update"))
 	case TabInstall:
 		hints = append(hints, KeyHint("1-4", "steps"))
+	case TabTools:
+		hints = append(hints, KeyHint("w", "wallet"))
 	case TabHelp:
 		hints = append(hints, KeyHint("↑↓", "scroll"))
 	}
@@ -1057,4 +1061,163 @@ func truncate(s string, max int) string {
 
 func renderTable(rows [][]string, indent int) string {
 	return Table(rows, indent)
+}
+
+// Tools tab rendering
+func (m Model) renderTools() string {
+	var b strings.Builder
+
+	b.WriteString(PageHeader("Tools", "Utilities for Monolythium operators"))
+	b.WriteString("\n\n")
+
+	// If viewing wallet result
+	if m.subView == SubViewToolsWalletResult && m.toolsData.WalletResult != nil {
+		return m.renderWalletResult()
+	}
+
+	// If generating wallet
+	if m.subView == SubViewToolsWalletGen {
+		return m.renderWalletForm()
+	}
+
+	// Main tools menu
+	cardWidth := m.width - 6
+	if cardWidth > 80 {
+		cardWidth = 80
+	}
+
+	// Wallet Generator card
+	walletCard := CardStyle.Width(cardWidth).Render(
+		HeaderStyle.Render("Wallet Generator") + "\n\n" +
+		TextMuted.Render("Generate a new secp256k1 keypair and save as encrypted keystore.\n\n") +
+		TextMuted.Render("Output:\n") +
+		"  - EVM address (0x...)\n" +
+		"  - Bech32 address (mono1...)\n" +
+		"  - Encrypted keystore v3 JSON\n\n" +
+		TextAction.Render("Press 'w' to generate a new wallet"),
+	)
+	b.WriteString("  ")
+	b.WriteString(walletCard)
+	b.WriteString("\n\n")
+
+	// Info about CLI usage
+	b.WriteString("  ")
+	b.WriteString(TextMuted.Render("CLI alternative: monoctl wallet generate --name <name>"))
+
+	return b.String()
+}
+
+func (m Model) renderWalletForm() string {
+	var b strings.Builder
+
+	b.WriteString(PageHeader("Wallet Generator", "Create a new encrypted keystore"))
+	b.WriteString("\n\n")
+
+	cardWidth := m.width - 6
+	if cardWidth > 80 {
+		cardWidth = 80
+	}
+
+	// Form card
+	var formContent strings.Builder
+
+	// Name field
+	nameLabel := "  Wallet Name (optional): "
+	if m.toolsData.WalletFormIndex == 0 {
+		nameLabel = TextAction.Render("> Wallet Name (optional): ")
+	}
+	formContent.WriteString(nameLabel)
+	formContent.WriteString(m.toolsData.WalletName)
+	formContent.WriteString("\n\n")
+
+	// Password field (masked)
+	passLabel := "  Password:               "
+	if m.toolsData.WalletFormIndex == 1 {
+		passLabel = TextAction.Render("> Password:               ")
+	}
+	formContent.WriteString(passLabel)
+	formContent.WriteString(strings.Repeat("*", len(m.toolsData.WalletPassword)))
+	formContent.WriteString("\n\n")
+
+	// Confirm password field (masked)
+	confLabel := "  Confirm Password:       "
+	if m.toolsData.WalletFormIndex == 2 {
+		confLabel = TextAction.Render("> Confirm Password:       ")
+	}
+	formContent.WriteString(confLabel)
+	formContent.WriteString(strings.Repeat("*", len(m.toolsData.WalletConfirm)))
+	formContent.WriteString("\n")
+
+	if m.toolsData.WalletError != nil {
+		formContent.WriteString("\n")
+		formContent.WriteString(TextDanger.Render("Error: " + m.toolsData.WalletError.Error()))
+		formContent.WriteString("\n")
+	}
+
+	if m.toolsData.WalletGenerating {
+		formContent.WriteString("\n")
+		formContent.WriteString(m.spinner.View())
+		formContent.WriteString(" Generating wallet...")
+	}
+
+	card := CardStyle.Width(cardWidth).Render(
+		HeaderStyle.Render("Enter Wallet Details") + "\n\n" +
+		formContent.String(),
+	)
+
+	b.WriteString("  ")
+	b.WriteString(card)
+	b.WriteString("\n\n")
+
+	// Instructions
+	b.WriteString("  ")
+	b.WriteString(TextMuted.Render("Use Tab/Up/Down to navigate, Enter to submit, Esc to cancel"))
+	b.WriteString("\n  ")
+	b.WriteString(TextMuted.Render("Password must be at least 8 characters"))
+
+	return b.String()
+}
+
+func (m Model) renderWalletResult() string {
+	var b strings.Builder
+
+	b.WriteString(PageHeader("Wallet Generated", "Your new wallet is ready"))
+	b.WriteString("\n\n")
+
+	cardWidth := m.width - 6
+	if cardWidth > 80 {
+		cardWidth = 80
+	}
+
+	result := m.toolsData.WalletResult
+
+	// Success card
+	card := CardStyle.Width(cardWidth).Render(
+		TextSuccess.Render("Wallet Created Successfully!") + "\n\n" +
+		"EVM Address:    " + result.EVMAddress + "\n" +
+		"Bech32 Address: " + result.Bech32Address + "\n\n" +
+		TextMuted.Render("Keystore saved to:") + "\n" +
+		TextMuted.Render(result.KeystorePath) + "\n",
+	)
+
+	b.WriteString("  ")
+	b.WriteString(card)
+	b.WriteString("\n\n")
+
+	// Warning card
+	warnCard := CardStyle.Width(cardWidth).Render(
+		TextWarning.Render("IMPORTANT SECURITY NOTICE") + "\n\n" +
+		"- Keep your password safe - it cannot be recovered\n" +
+		"- Never share your keystore or password with anyone\n" +
+		"- Back up your keystore file to a secure location\n" +
+		"- The private key is encrypted and NOT displayed",
+	)
+	b.WriteString("  ")
+	b.WriteString(warnCard)
+	b.WriteString("\n\n")
+
+	b.WriteString("  ")
+	b.WriteString(TextMuted.Render("Press Esc or Enter to return to Tools"))
+
+	return b.String()
 }

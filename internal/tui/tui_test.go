@@ -52,6 +52,7 @@ func TestTab_String(t *testing.T) {
 		{TabLogs, "Logs"},
 		{TabUpdate, "Update"},
 		{TabInstall, "(Re)Install"},
+		{TabTools, "Tools"},
 		{TabHelp, "Help"},
 	}
 
@@ -64,8 +65,8 @@ func TestTab_String(t *testing.T) {
 
 func TestAllTabs(t *testing.T) {
 	tabs := AllTabs()
-	if len(tabs) != 6 {
-		t.Errorf("AllTabs() returned %d tabs, want 6", len(tabs))
+	if len(tabs) != 7 {
+		t.Errorf("AllTabs() returned %d tabs, want 7", len(tabs))
 	}
 }
 
