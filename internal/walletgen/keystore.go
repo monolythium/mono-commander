@@ -4,8 +4,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,25 +15,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"golang.org/x/crypto/scrypt"
 )
 
 // KeystoreV3 represents an Ethereum-compatible keystore v3 file
 type KeystoreV3 struct {
-	Version int       `json:"version"`
-	ID      string    `json:"id"`
-	Address string    `json:"address"`
-	Crypto  CryptoV3  `json:"crypto"`
+	Version int      `json:"version"`
+	ID      string   `json:"id"`
+	Address string   `json:"address"`
+	Crypto  CryptoV3 `json:"crypto"`
 }
 
 // CryptoV3 holds the encrypted key data
 type CryptoV3 struct {
-	Cipher       string            `json:"cipher"`
-	CipherText   string            `json:"ciphertext"`
-	CipherParams CipherParamsV3    `json:"cipherparams"`
-	KDF          string            `json:"kdf"`
-	KDFParams    ScryptParamsV3    `json:"kdfparams"`
-	MAC          string            `json:"mac"`
+	Cipher       string         `json:"cipher"`
+	CipherText   string         `json:"ciphertext"`
+	CipherParams CipherParamsV3 `json:"cipherparams"`
+	KDF          string         `json:"kdf"`
+	KDFParams    ScryptParamsV3 `json:"kdfparams"`
+	MAC          string         `json:"mac"`
 }
 
 // CipherParamsV3 holds the AES-128-CTR IV
@@ -41,14 +44,15 @@ type CipherParamsV3 struct {
 
 // ScryptParamsV3 holds scrypt KDF parameters
 type ScryptParamsV3 struct {
-	N       int    `json:"n"`
-	R       int    `json:"r"`
-	P       int    `json:"p"`
-	DKLen   int    `json:"dklen"`
-	Salt    string `json:"salt"`
+	N     int    `json:"n"`
+	R     int    `json:"r"`
+	P     int    `json:"p"`
+	DKLen int    `json:"dklen"`
+	Salt  string `json:"salt"`
 }
 
 // Default scrypt parameters (matches go-ethereum defaults)
+// These are intentionally strong - keystore encryption should be slow to prevent brute force.
 const (
 	ScryptN     = 262144 // 2^18
 	ScryptR     = 8
@@ -74,14 +78,8 @@ func CreateKeystoreLight(kp *Keypair, password string) (*KeystoreV3, error) {
 }
 
 func createKeystoreWithParams(kp *Keypair, password string, n, r, p int) (*KeystoreV3, error) {
-	// Get private key bytes
+	// Get private key bytes (always 32 bytes from go-ethereum's crypto.FromECDSA)
 	privBytes := kp.PrivateKeyBytes()
-	if len(privBytes) < 32 {
-		// Pad to 32 bytes
-		padded := make([]byte, 32)
-		copy(padded[32-len(privBytes):], privBytes)
-		privBytes = padded
-	}
 
 	// Generate random salt (32 bytes)
 	salt := make([]byte, 32)
@@ -95,7 +93,7 @@ func createKeystoreWithParams(kp *Keypair, password string, n, r, p int) (*Keyst
 		return nil, fmt.Errorf("failed to derive key: %w", err)
 	}
 
-	// Split derived key: first 16 bytes for encryption, rest for MAC
+	// Split derived key: first 16 bytes for encryption, bytes 16-32 for MAC
 	encKey := derivedKey[:16]
 
 	// Generate random IV (16 bytes for AES-128-CTR)
@@ -115,8 +113,9 @@ func createKeystoreWithParams(kp *Keypair, password string, n, r, p int) (*Keyst
 	stream.XORKeyStream(ciphertext, privBytes)
 
 	// Calculate MAC: keccak256(derivedKey[16:32] + ciphertext)
+	// Using go-ethereum's Keccak256 for consistency
 	macData := append(derivedKey[16:32], ciphertext...)
-	mac := keccak256(macData)
+	mac := crypto.Keccak256(macData)
 
 	// Generate UUID
 	uuid, err := generateUUID()
@@ -151,6 +150,71 @@ func createKeystoreWithParams(kp *Keypair, password string, n, r, p int) (*Keyst
 			MAC: hex.EncodeToString(mac),
 		},
 	}, nil
+}
+
+// DecryptKeystore decrypts a keystore and returns the private key bytes.
+// This is used for compatibility testing - the password is required.
+// WARNING: Returns raw private key bytes - handle with extreme care.
+func DecryptKeystore(ks *KeystoreV3, password string) ([]byte, error) {
+	if ks.Crypto.KDF != "scrypt" {
+		return nil, errors.New("unsupported KDF: only scrypt is supported")
+	}
+	if ks.Crypto.Cipher != "aes-128-ctr" {
+		return nil, errors.New("unsupported cipher: only aes-128-ctr is supported")
+	}
+
+	// Decode hex values
+	salt, err := hex.DecodeString(ks.Crypto.KDFParams.Salt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid salt: %w", err)
+	}
+
+	ciphertext, err := hex.DecodeString(ks.Crypto.CipherText)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ciphertext: %w", err)
+	}
+
+	iv, err := hex.DecodeString(ks.Crypto.CipherParams.IV)
+	if err != nil {
+		return nil, fmt.Errorf("invalid IV: %w", err)
+	}
+
+	storedMAC, err := hex.DecodeString(ks.Crypto.MAC)
+	if err != nil {
+		return nil, fmt.Errorf("invalid MAC: %w", err)
+	}
+
+	// Derive key using scrypt
+	n := ks.Crypto.KDFParams.N
+	r := ks.Crypto.KDFParams.R
+	p := ks.Crypto.KDFParams.P
+	dkLen := ks.Crypto.KDFParams.DKLen
+
+	derivedKey, err := scrypt.Key([]byte(password), salt, n, r, p, dkLen)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive key: %w", err)
+	}
+
+	// Verify MAC
+	macData := append(derivedKey[16:32], ciphertext...)
+	calculatedMAC := crypto.Keccak256(macData)
+
+	if subtle.ConstantTimeCompare(storedMAC, calculatedMAC) != 1 {
+		return nil, errors.New("incorrect password or corrupted keystore")
+	}
+
+	// Decrypt
+	encKey := derivedKey[:16]
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	privBytes := make([]byte, len(ciphertext))
+	stream := cipher.NewCTR(block, iv)
+	stream.XORKeyStream(privBytes, ciphertext)
+
+	return privBytes, nil
 }
 
 // SaveKeystore saves a keystore to a file
@@ -278,11 +342,11 @@ func ListKeystores(dir string) ([]KeystoreInfo, error) {
 		bech32Addr, _ := GetKeystoreBech32Address(ks)
 
 		result = append(result, KeystoreInfo{
-			Filename:     name,
-			Path:         path,
-			EVMAddress:   evmAddr,
-			Bech32Addr:   bech32Addr,
-			CreatedAt:    info.ModTime(),
+			Filename:   name,
+			Path:       path,
+			EVMAddress: evmAddr,
+			Bech32Addr: bech32Addr,
+			CreatedAt:  info.ModTime(),
 		})
 	}
 
@@ -291,11 +355,11 @@ func ListKeystores(dir string) ([]KeystoreInfo, error) {
 
 // KeystoreInfo holds metadata about a keystore file
 type KeystoreInfo struct {
-	Filename     string    `json:"filename"`
-	Path         string    `json:"path"`
-	EVMAddress   string    `json:"evm_address"`
-	Bech32Addr   string    `json:"bech32_address"`
-	CreatedAt    time.Time `json:"created_at"`
+	Filename   string    `json:"filename"`
+	Path       string    `json:"path"`
+	EVMAddress string    `json:"evm_address"`
+	Bech32Addr string    `json:"bech32_address"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // generateUUID generates a random UUID v4
