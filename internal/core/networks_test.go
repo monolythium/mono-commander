@@ -174,3 +174,51 @@ func TestSeedString(t *testing.T) {
 		t.Errorf("SeedString() = %q for Localnet, want empty", seeds)
 	}
 }
+
+func TestDefaultPeersURLSelection(t *testing.T) {
+	// Verify that each public network has a default PeersURL pointing to mono-core-peers
+	tests := []struct {
+		network     NetworkName
+		wantBaseURL string
+		wantEmpty   bool
+	}{
+		{
+			network:     NetworkSprintnet,
+			wantBaseURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/sprintnet/peers.json",
+			wantEmpty:   false,
+		},
+		{
+			network:     NetworkTestnet,
+			wantBaseURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/testnet/peers.json",
+			wantEmpty:   false,
+		},
+		{
+			network:     NetworkMainnet,
+			wantBaseURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/mainnet/peers.json",
+			wantEmpty:   false,
+		},
+		{
+			network:   NetworkLocalnet,
+			wantEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.network), func(t *testing.T) {
+			n, err := GetNetwork(tt.network)
+			if err != nil {
+				t.Fatalf("GetNetwork() error = %v", err)
+			}
+
+			if tt.wantEmpty {
+				if n.PeersURL != "" {
+					t.Errorf("PeersURL = %q, want empty for %s", n.PeersURL, tt.network)
+				}
+			} else {
+				if n.PeersURL != tt.wantBaseURL {
+					t.Errorf("PeersURL = %q, want %q", n.PeersURL, tt.wantBaseURL)
+				}
+			}
+		})
+	}
+}
