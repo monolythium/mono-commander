@@ -68,7 +68,7 @@ func TestParsePeersRegistry(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid registry",
+			name: "valid registry with object format",
 			data: `{
 				"chain_id": "mono-sprint-1",
 				"genesis_sha256": "abc123",
@@ -86,7 +86,7 @@ func TestParsePeersRegistry(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid peer",
+			name: "invalid peer object",
 			data: `{
 				"chain_id": "mono-sprint-1",
 				"peers": [
@@ -107,6 +107,165 @@ func TestParsePeersRegistry(t *testing.T) {
 			_, err := ParsePeersRegistry([]byte(tt.data))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParsePeersRegistry() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParsePeersRegistryStringFormat(t *testing.T) {
+	// Test parsing string format peers (canonical in mono-core-peers)
+	tests := []struct {
+		name           string
+		data           string
+		wantErr        bool
+		wantPeerCount  int
+		wantSeedCount  int
+		wantPersistent int
+	}{
+		{
+			name: "string format persistent_peers",
+			data: `{
+				"chain_id": "mono-sprint-1",
+				"genesis_sha256": "bb0808bda51108c25461f21fa805c188599f5985f59f72cd26636b7f92406022",
+				"seeds": [],
+				"persistent_peers": [
+					"1640233292d71449a29a34837cfce4d5ce34bb28@95.217.191.120:26766"
+				]
+			}`,
+			wantErr:        false,
+			wantPeerCount:  0,
+			wantSeedCount:  0,
+			wantPersistent: 1,
+		},
+		{
+			name: "string format seeds",
+			data: `{
+				"chain_id": "mono-sprint-1",
+				"genesis_sha256": "abc123",
+				"seeds": [
+					"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@seed1.example.com:26656",
+					"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb@seed2.example.com:26656"
+				],
+				"persistent_peers": []
+			}`,
+			wantErr:        false,
+			wantPeerCount:  0,
+			wantSeedCount:  2,
+			wantPersistent: 0,
+		},
+		{
+			name: "mixed formats",
+			data: `{
+				"chain_id": "mono-sprint-1",
+				"genesis_sha256": "abc123",
+				"seeds": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@seed1.example.com:26656"],
+				"peers": [{"node_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "address": "host.com", "port": 26656}],
+				"persistent_peers": ["cccccccccccccccccccccccccccccccccccccccc@peer.example.com:26656"]
+			}`,
+			wantErr:        false,
+			wantPeerCount:  1,
+			wantSeedCount:  1,
+			wantPersistent: 1,
+		},
+		{
+			name: "invalid string format - bad node_id",
+			data: `{
+				"chain_id": "mono-sprint-1",
+				"genesis_sha256": "abc123",
+				"seeds": [],
+				"persistent_peers": ["invalid@host.com:26656"]
+			}`,
+			wantErr: true,
+		},
+		{
+			name: "invalid string format - missing port",
+			data: `{
+				"chain_id": "mono-sprint-1",
+				"genesis_sha256": "abc123",
+				"seeds": [],
+				"persistent_peers": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@host.com"]
+			}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg, err := ParsePeersRegistry([]byte(tt.data))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParsePeersRegistry() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if len(reg.Peers) != tt.wantPeerCount {
+				t.Errorf("ParsePeersRegistry() peers count = %d, want %d", len(reg.Peers), tt.wantPeerCount)
+			}
+			if len(reg.Seeds) != tt.wantSeedCount {
+				t.Errorf("ParsePeersRegistry() seeds count = %d, want %d", len(reg.Seeds), tt.wantSeedCount)
+			}
+			if len(reg.PersistentPeers) != tt.wantPersistent {
+				t.Errorf("ParsePeersRegistry() persistent_peers count = %d, want %d", len(reg.PersistentPeers), tt.wantPersistent)
+			}
+		})
+	}
+}
+
+func TestParsePeerString(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantID  string
+		wantAddr string
+		wantPort int
+		wantErr bool
+	}{
+		{
+			input:    "1640233292d71449a29a34837cfce4d5ce34bb28@95.217.191.120:26766",
+			wantID:   "1640233292d71449a29a34837cfce4d5ce34bb28",
+			wantAddr: "95.217.191.120",
+			wantPort: 26766,
+			wantErr:  false,
+		},
+		{
+			input:    "ABCDEF1234567890abcdef1234567890abcdef12@seed.example.com:26656",
+			wantID:   "abcdef1234567890abcdef1234567890abcdef12", // lowercased
+			wantAddr: "seed.example.com",
+			wantPort: 26656,
+			wantErr:  false,
+		},
+		{
+			input:   "invalid@host.com:26656",
+			wantErr: true,
+		},
+		{
+			input:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@host.com", // missing port
+			wantErr: true,
+		},
+		{
+			input:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@:26656", // missing host
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			peer, err := parsePeerString(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parsePeerString() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if peer.NodeID != tt.wantID {
+				t.Errorf("parsePeerString() NodeID = %v, want %v", peer.NodeID, tt.wantID)
+			}
+			if peer.Address != tt.wantAddr {
+				t.Errorf("parsePeerString() Address = %v, want %v", peer.Address, tt.wantAddr)
+			}
+			if peer.Port != tt.wantPort {
+				t.Errorf("parsePeerString() Port = %v, want %v", peer.Port, tt.wantPort)
 			}
 		})
 	}

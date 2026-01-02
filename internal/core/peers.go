@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -14,16 +15,29 @@ type Peer struct {
 	Port    int    `json:"port,omitempty"`
 }
 
+// peersRegistryRaw is used for initial JSON parsing with flexible peer formats.
+type peersRegistryRaw struct {
+	ChainID         string            `json:"chain_id"`
+	GenesisSHA      string            `json:"genesis_sha256"`
+	Seeds           []json.RawMessage `json:"seeds"`
+	Peers           []json.RawMessage `json:"peers"`
+	PersistentPeers []json.RawMessage `json:"persistent_peers"`
+}
+
 // PeersRegistry represents a peers.json file.
 type PeersRegistry struct {
-	ChainID         string `json:"chain_id"`
-	GenesisSHA      string `json:"genesis_sha256"`
-	Peers           []Peer `json:"peers"`
-	PersistentPeers []Peer `json:"persistent_peers,omitempty"`
+	ChainID         string
+	GenesisSHA      string
+	Seeds           []Peer
+	Peers           []Peer
+	PersistentPeers []Peer
 }
 
 // nodeIDRegex validates a Tendermint node ID (40 hex chars).
 var nodeIDRegex = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
+
+// peerStringRegex matches "nodeid@host:port" format.
+var peerStringRegex = regexp.MustCompile(`^([a-fA-F0-9]{40})@([a-zA-Z0-9.-]+):(\d+)$`)
 
 // ValidatePeer validates a peer entry.
 func ValidatePeer(p Peer) error {
@@ -39,30 +53,112 @@ func ValidatePeer(p Peer) error {
 	return nil
 }
 
+// parsePeerString parses a peer string in format "nodeid@host:port".
+func parsePeerString(s string) (Peer, error) {
+	matches := peerStringRegex.FindStringSubmatch(s)
+	if matches == nil {
+		return Peer{}, fmt.Errorf("invalid peer string format: %s (expected nodeid@host:port)", s)
+	}
+
+	port, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return Peer{}, fmt.Errorf("invalid port in peer string: %s", matches[3])
+	}
+
+	return Peer{
+		NodeID:  strings.ToLower(matches[1]),
+		Address: matches[2],
+		Port:    port,
+	}, nil
+}
+
+// parsePeerElement parses a peer from either string or object format.
+func parsePeerElement(raw json.RawMessage) (Peer, error) {
+	// Try string format first (canonical in mono-core-peers)
+	var peerStr string
+	if err := json.Unmarshal(raw, &peerStr); err == nil {
+		return parsePeerString(peerStr)
+	}
+
+	// Try object format (legacy)
+	var peerObj Peer
+	if err := json.Unmarshal(raw, &peerObj); err == nil {
+		return peerObj, nil
+	}
+
+	return Peer{}, fmt.Errorf("peer must be string \"nodeid@host:port\" or object {node_id, address, port}")
+}
+
+// parsePeerArray parses an array of peers in either format.
+func parsePeerArray(raw []json.RawMessage, fieldName string) ([]Peer, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	peers := make([]Peer, 0, len(raw))
+	for i, elem := range raw {
+		peer, err := parsePeerElement(elem)
+		if err != nil {
+			return nil, fmt.Errorf("%s[%d]: %w", fieldName, i, err)
+		}
+		peers = append(peers, peer)
+	}
+	return peers, nil
+}
+
 // ParsePeersRegistry parses and validates a peers.json file.
+// Supports both string format ("nodeid@host:port") and object format.
 func ParsePeersRegistry(data []byte) (*PeersRegistry, error) {
-	var reg PeersRegistry
-	if err := json.Unmarshal(data, &reg); err != nil {
+	var raw peersRegistryRaw
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse peers.json: %w", err)
 	}
 
-	if reg.ChainID == "" {
+	if raw.ChainID == "" {
 		return nil, fmt.Errorf("peers.json missing chain_id")
 	}
 
-	for i, p := range reg.Peers {
+	seeds, err := parsePeerArray(raw.Seeds, "seeds")
+	if err != nil {
+		return nil, err
+	}
+
+	peers, err := parsePeerArray(raw.Peers, "peers")
+	if err != nil {
+		return nil, err
+	}
+
+	persistentPeers, err := parsePeerArray(raw.PersistentPeers, "persistent_peers")
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate all parsed peers
+	for i, p := range seeds {
+		if err := ValidatePeer(p); err != nil {
+			return nil, fmt.Errorf("seeds[%d]: %w", i, err)
+		}
+	}
+
+	for i, p := range peers {
 		if err := ValidatePeer(p); err != nil {
 			return nil, fmt.Errorf("peers[%d]: %w", i, err)
 		}
 	}
 
-	for i, p := range reg.PersistentPeers {
+	for i, p := range persistentPeers {
 		if err := ValidatePeer(p); err != nil {
 			return nil, fmt.Errorf("persistent_peers[%d]: %w", i, err)
 		}
 	}
 
-	return &reg, nil
+	return &PeersRegistry{
+		ChainID:         raw.ChainID,
+		GenesisSHA:      raw.GenesisSHA,
+		Seeds:           seeds,
+		Peers:           peers,
+		PersistentPeers: persistentPeers,
+	}, nil
 }
 
 // ValidatePeersRegistry validates that the peers registry matches the expected genesis.
