@@ -114,6 +114,16 @@ Or use CLI commands:
 		Run:   runSystemdInstall,
 	}
 
+	// Version command
+	versionCmd = &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("monoctl version %s\n", tui.Version)
+			fmt.Printf("  OS/Arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		},
+	}
+
 	// Status command
 	statusCmd = &cobra.Command{
 		Use:   "status",
@@ -481,6 +491,9 @@ func init() {
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+
+	// Version command
+	rootCmd.AddCommand(versionCmd)
 
 	// Networks subcommands
 	networksCmd.AddCommand(networksListCmd)
