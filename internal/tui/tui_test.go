@@ -613,15 +613,15 @@ func TestOrValue(t *testing.T) {
 
 func TestTruncate(t *testing.T) {
 	tests := []struct {
-		s   string
-		max int
+		s    string
+		max  int
 		want string
 	}{
 		{"short", 10, "short"},
 		{"long string", 5, "lo..."},
 		{"abc", 3, "abc"},
-		{"abcd", 4, "abcd"},     // exact length, no truncation needed
-		{"abcde", 4, "a..."},   // over limit, truncate
+		{"abcd", 4, "abcd"},  // exact length, no truncation needed
+		{"abcde", 4, "a..."}, // over limit, truncate
 	}
 
 	for _, tt := range tests {

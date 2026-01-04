@@ -214,11 +214,11 @@ func TestParsePeersRegistryStringFormat(t *testing.T) {
 
 func TestParsePeerString(t *testing.T) {
 	tests := []struct {
-		input   string
-		wantID  string
+		input    string
+		wantID   string
 		wantAddr string
 		wantPort int
-		wantErr bool
+		wantErr  bool
 	}{
 		{
 			input:    "1640233292d71449a29a34837cfce4d5ce34bb28@95.217.191.120:26766",

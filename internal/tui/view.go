@@ -132,7 +132,6 @@ func (m Model) getContextualHints() []string {
 	return hints
 }
 
-
 // Dashboard rendering with cards layout
 func (m Model) renderDashboard() string {
 	var b strings.Builder
@@ -1089,12 +1088,12 @@ func (m Model) renderTools() string {
 	// Wallet Generator card
 	walletCard := CardStyle.Width(cardWidth).Render(
 		HeaderStyle.Render("Wallet Generator") + "\n\n" +
-		TextMuted.Render("Generate a new secp256k1 keypair and save as encrypted keystore.\n\n") +
-		TextMuted.Render("Output:\n") +
-		"  - EVM address (0x...)\n" +
-		"  - Bech32 address (mono1...)\n" +
-		"  - Encrypted keystore v3 JSON\n\n" +
-		TextAction.Render("Press 'w' to generate a new wallet"),
+			TextMuted.Render("Generate a new secp256k1 keypair and save as encrypted keystore.\n\n") +
+			TextMuted.Render("Output:\n") +
+			"  - EVM address (0x...)\n" +
+			"  - Bech32 address (mono1...)\n" +
+			"  - Encrypted keystore v3 JSON\n\n" +
+			TextAction.Render("Press 'w' to generate a new wallet"),
 	)
 	b.WriteString("  ")
 	b.WriteString(walletCard)
@@ -1162,7 +1161,7 @@ func (m Model) renderWalletForm() string {
 
 	card := CardStyle.Width(cardWidth).Render(
 		HeaderStyle.Render("Enter Wallet Details") + "\n\n" +
-		formContent.String(),
+			formContent.String(),
 	)
 
 	b.WriteString("  ")
@@ -1194,10 +1193,10 @@ func (m Model) renderWalletResult() string {
 	// Success card
 	card := CardStyle.Width(cardWidth).Render(
 		TextSuccess.Render("Wallet Created Successfully!") + "\n\n" +
-		"EVM Address:    " + result.EVMAddress + "\n" +
-		"Bech32 Address: " + result.Bech32Address + "\n\n" +
-		TextMuted.Render("Keystore saved to:") + "\n" +
-		TextMuted.Render(result.KeystorePath) + "\n",
+			"EVM Address:    " + result.EVMAddress + "\n" +
+			"Bech32 Address: " + result.Bech32Address + "\n\n" +
+			TextMuted.Render("Keystore saved to:") + "\n" +
+			TextMuted.Render(result.KeystorePath) + "\n",
 	)
 
 	b.WriteString("  ")
@@ -1207,10 +1206,10 @@ func (m Model) renderWalletResult() string {
 	// Warning card
 	warnCard := CardStyle.Width(cardWidth).Render(
 		TextWarning.Render("IMPORTANT SECURITY NOTICE") + "\n\n" +
-		"- Keep your password safe - it cannot be recovered\n" +
-		"- Never share your keystore or password with anyone\n" +
-		"- Back up your keystore file to a secure location\n" +
-		"- The private key is encrypted and NOT displayed",
+			"- Keep your password safe - it cannot be recovered\n" +
+			"- Never share your keystore or password with anyone\n" +
+			"- Back up your keystore file to a secure location\n" +
+			"- The private key is encrypted and NOT displayed",
 	)
 	b.WriteString("  ")
 	b.WriteString(warnCard)

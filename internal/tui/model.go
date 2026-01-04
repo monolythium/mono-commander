@@ -239,13 +239,13 @@ type HealthData struct {
 
 // SystemHealthInfo holds system requirements health
 type SystemHealthInfo struct {
-	OS           string
-	Arch         string
-	CPUCount     int
-	RAMTotal     uint64
-	RAMFree      uint64
-	DiskFree     uint64
-	Ports        []PortStatus
+	OS       string
+	Arch     string
+	CPUCount int
+	RAMTotal uint64
+	RAMFree  uint64
+	DiskFree uint64
+	Ports    []PortStatus
 }
 
 // PortStatus holds port listening status
@@ -278,13 +278,13 @@ type RPCStatus struct {
 
 // ValidatorHealthInfo holds validator-specific health info
 type ValidatorHealthInfo struct {
-	IsValidator     bool
-	ValoperAddr     string
-	Status          string // bonded/unbonding/unbonded
-	Jailed          bool
-	MissedBlocks    int64
-	JailedUntil     time.Time
-	NotConfigured   bool
+	IsValidator   bool
+	ValoperAddr   string
+	Status        string // bonded/unbonding/unbonded
+	Jailed        bool
+	MissedBlocks  int64
+	JailedUntil   time.Time
+	NotConfigured bool
 }
 
 // LogsData holds log viewer state
@@ -316,8 +316,8 @@ type UpdateData struct {
 
 // UpdateInfo holds update check result
 type UpdateInfo struct {
-	CurrentVersion string
-	LatestVersion  string
+	CurrentVersion  string
+	LatestVersion   string
 	UpdateAvailable bool
 }
 
@@ -341,7 +341,7 @@ type ToolsData struct {
 	WalletResult     *WalletResult
 	WalletError      error
 	// Form field index (0=name, 1=password, 2=confirm)
-	WalletFormIndex  int
+	WalletFormIndex int
 }
 
 // WalletResult holds the result of wallet generation

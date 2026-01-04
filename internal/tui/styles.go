@@ -139,9 +139,9 @@ var (
 
 	// Tab bar container
 	TabBarContainer = lipgloss.NewStyle().
-				PaddingLeft(1).
-				MarginTop(0).
-				MarginBottom(0)
+			PaddingLeft(1).
+			MarginTop(0).
+			MarginBottom(0)
 
 	// Tab bar bottom border
 	TabBarBorder = lipgloss.NewStyle().

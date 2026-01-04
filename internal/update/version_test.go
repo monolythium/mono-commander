@@ -122,7 +122,7 @@ func TestAssetNamePattern(t *testing.T) {
 		{"linux", "arm64", "monoctl-linux-arm64", true},
 		{"linux", "amd64", "monoctl_linux_arm64", false},
 		{"darwin", "amd64", "monoctl_linux_amd64", false},
-		{"linux", "x86_64", "monoctl_linux_amd64", true}, // x86_64 -> amd64
+		{"linux", "x86_64", "monoctl_linux_amd64", true},  // x86_64 -> amd64
 		{"linux", "aarch64", "monoctl_linux_arm64", true}, // aarch64 -> arm64
 	}
 

@@ -307,18 +307,18 @@ func buildCommonArgs(opts TxBuilderOptions, network Network) []string {
 
 // CreateValidatorParams contains parameters for create-validator
 type CreateValidatorParams struct {
-	Moniker               string
-	Identity              string // optional keybase identity
-	Website               string // optional website
-	SecurityContact       string // optional security contact
-	Details               string // optional details
-	CommissionRate        string // e.g., "0.10" for 10%
-	CommissionMaxRate     string // e.g., "0.20" for 20%
-	CommissionMaxChange   string // e.g., "0.01" for 1%
-	MinSelfDelegation     string // in alyth, must be >= 100000 LYTH
-	Amount                string // self-bond amount in alyth, must be >= 100000 LYTH
-	PubKeyPath            string // optional: path to consensus pubkey file
-	PubKeyAuto            bool   // if true, derive from keyring
+	Moniker             string
+	Identity            string // optional keybase identity
+	Website             string // optional website
+	SecurityContact     string // optional security contact
+	Details             string // optional details
+	CommissionRate      string // e.g., "0.10" for 10%
+	CommissionMaxRate   string // e.g., "0.20" for 20%
+	CommissionMaxChange string // e.g., "0.01" for 1%
+	MinSelfDelegation   string // in alyth, must be >= 100000 LYTH
+	Amount              string // self-bond amount in alyth, must be >= 100000 LYTH
+	PubKeyPath          string // optional: path to consensus pubkey file
+	PubKeyAuto          bool   // if true, derive from keyring
 }
 
 // BuildCreateValidatorTx builds a create-validator transaction command.
