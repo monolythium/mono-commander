@@ -94,48 +94,15 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 	result.ChainID = chainID
 	result.Steps[len(result.Steps)-1].Status = "success"
 
-	// Step 3: Verify SHA256 if provided
-	if opts.GenesisSHA != "" {
-		logger.Info("verifying genesis SHA256", "expected", opts.GenesisSHA)
-		result.Steps = append(result.Steps, JoinStep{Name: "Verify SHA256", Status: "pending"})
-
-		hash := sha256.Sum256(genesisData)
-		actual := hex.EncodeToString(hash[:])
-
-		if actual != opts.GenesisSHA {
-			result.Steps[len(result.Steps)-1].Status = "failed"
-			msg := fmt.Sprintf("SHA256 mismatch: expected %s, got %s", opts.GenesisSHA, actual)
-			result.Steps[len(result.Steps)-1].Message = msg
-			return result, fmt.Errorf("SHA256 mismatch: expected %s, got %s", opts.GenesisSHA, actual)
-		}
-		result.Steps[len(result.Steps)-1].Status = "success"
-	}
-
-	// Step 4: Write genesis file
-	logger.Info("writing genesis", "home", opts.Home, "dry_run", opts.DryRun)
-	result.Steps = append(result.Steps, JoinStep{Name: "Write genesis", Status: "pending"})
-
-	genesisPath, err := WriteGenesis(opts.Home, genesisData, opts.DryRun)
-	if err != nil {
-		result.Steps[len(result.Steps)-1].Status = "failed"
-		result.Steps[len(result.Steps)-1].Message = err.Error()
-		return result, fmt.Errorf("failed to write genesis: %w", err)
-	}
-	result.GenesisPath = genesisPath
-	if opts.DryRun {
-		result.Steps[len(result.Steps)-1].Status = "success"
-		result.Steps[len(result.Steps)-1].Message = "(dry-run)"
-	} else {
-		result.Steps[len(result.Steps)-1].Status = "success"
-	}
-
-	// Step 5: Download and process peers if URL provided
+	// Step 3: Download peers to get genesis SHA256
 	peersURL := opts.PeersURL
 	if peersURL == "" {
 		peersURL = network.PeersURL
 	}
 
+	var genesisSHA string
 	var persistentPeers []Peer
+
 	if peersURL != "" {
 		logger.Info("downloading peers", "url", peersURL)
 		result.Steps = append(result.Steps, JoinStep{Name: "Download peers", Status: "pending"})
@@ -153,17 +120,59 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 				result.Steps[len(result.Steps)-1].Message = err.Error()
 				logger.Warn("failed to parse peers, continuing without", "error", err)
 			} else {
-				if err := ValidatePeersRegistry(reg, network.ChainID, opts.GenesisSHA); err != nil {
+				if reg.ChainID != network.ChainID {
 					result.Steps[len(result.Steps)-1].Status = "skipped"
-					result.Steps[len(result.Steps)-1].Message = err.Error()
-					logger.Warn("peers registry validation failed", "error", err)
+					msg := fmt.Sprintf("chain_id mismatch: expected %s, got %s", network.ChainID, reg.ChainID)
+					result.Steps[len(result.Steps)-1].Message = msg
+					logger.Warn("peers registry validation failed", "error", msg)
 				} else {
 					persistentPeers = MergePeers(reg.Peers, reg.PersistentPeers)
+					genesisSHA = reg.GenesisSHA
 					result.Steps[len(result.Steps)-1].Status = "success"
 					result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("%d peers", len(persistentPeers))
 				}
 			}
 		}
+	}
+
+	// Step 4: Verify SHA256 (use opts.GenesisSHA if provided, otherwise use from peers.json)
+	expectedSHA := opts.GenesisSHA
+	if expectedSHA == "" {
+		expectedSHA = genesisSHA
+	}
+
+	if expectedSHA != "" {
+		logger.Info("verifying genesis SHA256", "expected", expectedSHA)
+		result.Steps = append(result.Steps, JoinStep{Name: "Verify SHA256", Status: "pending"})
+
+		hash := sha256.Sum256(genesisData)
+		actual := hex.EncodeToString(hash[:])
+
+		if actual != expectedSHA {
+			result.Steps[len(result.Steps)-1].Status = "failed"
+			msg := fmt.Sprintf("SHA256 mismatch: expected %s, got %s", expectedSHA, actual)
+			result.Steps[len(result.Steps)-1].Message = msg
+			return result, fmt.Errorf("SHA256 mismatch: expected %s, got %s", expectedSHA, actual)
+		}
+		result.Steps[len(result.Steps)-1].Status = "success"
+	}
+
+	// Step 5: Write genesis file
+	logger.Info("writing genesis", "home", opts.Home, "dry_run", opts.DryRun)
+	result.Steps = append(result.Steps, JoinStep{Name: "Write genesis", Status: "pending"})
+
+	genesisPath, err := WriteGenesis(opts.Home, genesisData, opts.DryRun)
+	if err != nil {
+		result.Steps[len(result.Steps)-1].Status = "failed"
+		result.Steps[len(result.Steps)-1].Message = err.Error()
+		return result, fmt.Errorf("failed to write genesis: %w", err)
+	}
+	result.GenesisPath = genesisPath
+	if opts.DryRun {
+		result.Steps[len(result.Steps)-1].Status = "success"
+		result.Steps[len(result.Steps)-1].Message = "(dry-run)"
+	} else {
+		result.Steps[len(result.Steps)-1].Status = "success"
 	}
 
 	// Step 6: Generate config patch
