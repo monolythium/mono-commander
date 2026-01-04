@@ -1,15 +1,15 @@
 module github.com/monolythium/mono-commander
 
-go 1.23.0
+go 1.24.0
 
 require (
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/charmbracelet/lipgloss v1.0.0
-	github.com/ethereum/go-ethereum v1.14.12
+	github.com/ethereum/go-ethereum v1.14.13
 	github.com/spf13/cobra v1.8.1
-	golang.org/x/crypto v0.31.0
-	golang.org/x/term v0.27.0
+	golang.org/x/crypto v0.46.0
+	golang.org/x/term v0.38.0
 )
 
 require (
@@ -31,7 +31,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 )
