@@ -16,6 +16,7 @@ import (
 	"github.com/monolythium/mono-commander/internal/core"
 	"github.com/monolythium/mono-commander/internal/logs"
 	"github.com/monolythium/mono-commander/internal/mesh"
+	"github.com/monolythium/mono-commander/internal/monod"
 	"github.com/monolythium/mono-commander/internal/net"
 	oshelpers "github.com/monolythium/mono-commander/internal/os"
 	"github.com/monolythium/mono-commander/internal/tui"
@@ -318,6 +319,41 @@ Shows:
   - Keystore file metadata`,
 		Run: runWalletInfo,
 	}
+
+	// Monod command group
+	monodCmd = &cobra.Command{
+		Use:   "monod",
+		Short: "Monod binary management commands",
+		Long: `Install and manage the monod binary from GitHub releases.
+
+Install monod:
+  monoctl monod install [--version v0.1.0]
+
+Check installation:
+  monoctl monod status`,
+	}
+
+	monodInstallCmd = &cobra.Command{
+		Use:   "install",
+		Short: "Install the monod binary",
+		Long: `Download and install the monod binary from GitHub releases.
+
+Automatically detects your OS and architecture, fetches the appropriate binary,
+verifies the SHA256 checksum, and installs it to ~/.local/bin/monod (or /usr/local/bin with --system).
+
+Examples:
+  monoctl monod install
+  monoctl monod install --version v0.1.0
+  monoctl monod install --system
+  monoctl monod install --dry-run`,
+		Run: runMonodInstall,
+	}
+
+	monodStatusCmd = &cobra.Command{
+		Use:   "status",
+		Short: "Check monod installation status",
+		Run:   runMonodStatus,
+	}
 )
 
 func init() {
@@ -513,6 +549,20 @@ func init() {
 	walletCmd.AddCommand(walletInfoCmd)
 
 	rootCmd.AddCommand(walletCmd)
+
+	// Monod commands
+	monodInstallCmd.Flags().String("version", "", "Version to install (default: latest)")
+	monodInstallCmd.Flags().String("url", "", "Download URL for the binary (auto-detected if not specified)")
+	monodInstallCmd.Flags().String("sha256", "", "Expected SHA256 checksum (auto-fetched if not specified)")
+	monodInstallCmd.Flags().Bool("insecure", false, "Skip checksum verification (not recommended)")
+	monodInstallCmd.Flags().Bool("system", false, "Install to /usr/local/bin (requires sudo)")
+	monodInstallCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	monodCmd.AddCommand(monodInstallCmd)
+
+	monodStatusCmd.Flags().Bool("system", false, "Check /usr/local/bin instead of ~/.local/bin")
+	monodCmd.AddCommand(monodStatusCmd)
+
+	rootCmd.AddCommand(monodCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -2062,6 +2112,120 @@ func runWalletInfo(cmd *cobra.Command, args []string) {
 	fmt.Printf("KDF:            %s\n", ks.Crypto.KDF)
 	if stat != nil {
 		fmt.Printf("Created:        %s\n", stat.ModTime().Format("2006-01-02 15:04:05"))
+	}
+}
+
+// =============================================================================
+// Monod Commands
+// =============================================================================
+
+func runMonodInstall(cmd *cobra.Command, args []string) {
+	url, _ := cmd.Flags().GetString("url")
+	sha256sum, _ := cmd.Flags().GetString("sha256")
+	version, _ := cmd.Flags().GetString("version")
+	insecure, _ := cmd.Flags().GetBool("insecure")
+	useSystem, _ := cmd.Flags().GetBool("system")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	opts := monod.InstallOptions{
+		URL:           url,
+		SHA256:        sha256sum,
+		Version:       version,
+		UseSystemPath: useSystem,
+		Insecure:      insecure,
+		DryRun:        dryRun,
+	}
+
+	result := monod.Install(opts)
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		if !result.Success {
+			os.Exit(1)
+		}
+		return
+	}
+
+	fmt.Println("Monod Binary Installation")
+	fmt.Println(strings.Repeat("-", 50))
+
+	if dryRun {
+		fmt.Println("(DRY RUN - no changes will be made)")
+		fmt.Println()
+	}
+
+	for _, step := range result.Steps {
+		status := "[ ]"
+		switch step.Status {
+		case "success":
+			status = "[+]"
+		case "failed":
+			status = "[X]"
+		case "skipped":
+			status = "[-]"
+		}
+		msg := step.Name
+		if step.Message != "" {
+			msg += ": " + step.Message
+		}
+		fmt.Printf("%s %s\n", status, msg)
+	}
+
+	if result.Error != nil {
+		fmt.Fprintf(os.Stderr, "\nError: %v\n", result.Error)
+		os.Exit(1)
+	}
+
+	if result.Success && !dryRun {
+		fmt.Printf("\nBinary installed to: %s\n", result.InstallPath)
+		if result.SHA256 != "" {
+			fmt.Printf("SHA256: %s\n", result.SHA256)
+		}
+		fmt.Printf("Version: %s\n", result.Version)
+
+		if !opts.UseSystemPath {
+			fmt.Println("\nMake sure ~/.local/bin is in your PATH:")
+			fmt.Println("  export PATH=\"$HOME/.local/bin:$PATH\"")
+		}
+	}
+}
+
+func runMonodStatus(cmd *cobra.Command, args []string) {
+	useSystem, _ := cmd.Flags().GetBool("system")
+
+	installPath := monod.BinaryInstallPath(useSystem)
+	exists := monod.BinaryExists(useSystem)
+
+	if jsonOutput {
+		out := map[string]interface{}{
+			"install_path": installPath,
+			"installed":    exists,
+		}
+		if exists {
+			version, _ := monod.GetInstalledVersion(useSystem)
+			out["version"] = version
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	fmt.Println("Monod Binary Status")
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Printf("Install path:  %s\n", installPath)
+
+	if exists {
+		fmt.Printf("Status:        INSTALLED\n")
+		version, err := monod.GetInstalledVersion(useSystem)
+		if err == nil {
+			fmt.Printf("Version:       %s\n", version)
+		}
+	} else {
+		fmt.Printf("Status:        NOT INSTALLED\n")
+		fmt.Println()
+		fmt.Println("To install, run:")
+		fmt.Println("  monoctl monod install")
 	}
 }
 
