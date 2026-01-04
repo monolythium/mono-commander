@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  monod:
+    image: ${MONOLYTHIUM_IMAGE:-monolythium/monod}:${MONOLYTHIUM_VERSION:-latest}
+    container_name: monod-${MONOLYTHIUM_NETWORK:-sprintnet}
+    restart: unless-stopped
+
+    # Environment variables
+    environment:
+      - MONOLYTHIUM_NETWORK=${MONOLYTHIUM_NETWORK:-Sprintnet}
+      - MONOLYTHIUM_CHAIN_ID=${MONOLYTHIUM_CHAIN_ID:-mono-sprintnet-1}
+
+    # Port mappings (host:container)
+    ports:
+      - "${MONOLYTHIUM_PORT_P2P:-26656}:26656"      # P2P
+      - "${MONOLYTHIUM_PORT_RPC:-26657}:26657"      # CometBFT RPC
+      - "${MONOLYTHIUM_PORT_REST:-1317}:1317"       # Cosmos REST API
+      - "${MONOLYTHIUM_PORT_GRPC:-9090}:9090"       # gRPC
+      - "${MONOLYTHIUM_PORT_EVM_RPC:-8545}:8545"    # EVM JSON-RPC
+      - "${MONOLYTHIUM_PORT_EVM_WS:-8546}:8546"     # EVM WebSocket
+
+    # Volume mounts
+    volumes:
+      - ${MONOLYTHIUM_HOST_HOME:-~/.monod}:/root/.monod
+
+    # Network mode (bridge by default, use 'host' for better validator performance)
+    network_mode: bridge
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:26657/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
