@@ -48,6 +48,7 @@ Wants=network-online.target
 [Service]
 User={{ .User }}
 Group={{ .User }}
+WorkingDirectory={{ .Home }}
 Type=simple
 {{- if .UseCosmovisor }}
 Environment="DAEMON_NAME=monod"
