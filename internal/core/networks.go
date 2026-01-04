@@ -46,7 +46,7 @@ var networks = map[NetworkName]Network{
 			"seed2.sprintnet.mononodes.xyz",
 			"seed3.sprintnet.mononodes.xyz",
 		},
-		GenesisURL: "https://raw.githubusercontent.com/monolythium/mono-core/dev/ops/testnet/sprintnet/artifacts/genesis.json",
+		GenesisURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/sprintnet/genesis.json",
 		PeersURL:   "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/sprintnet/peers.json",
 	},
 	NetworkTestnet: {
@@ -58,7 +58,7 @@ var networks = map[NetworkName]Network{
 			"seed2.testnet.mononodes.xyz",
 			"seed3.testnet.mononodes.xyz",
 		},
-		GenesisURL: "https://raw.githubusercontent.com/monolythium/mono-core/dev/ops/testnet/testnet/artifacts/genesis.json",
+		GenesisURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/testnet/genesis.json",
 		PeersURL:   "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/testnet/peers.json",
 	},
 	NetworkMainnet: {
@@ -70,7 +70,7 @@ var networks = map[NetworkName]Network{
 			"seed2.mainnet.mononodes.xyz",
 			"seed3.mainnet.mononodes.xyz",
 		},
-		GenesisURL: "https://raw.githubusercontent.com/monolythium/mono-core/dev/ops/mainnet/artifacts/genesis.json",
+		GenesisURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/mainnet/genesis.json",
 		PeersURL:   "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/mainnet/peers.json",
 	},
 }
