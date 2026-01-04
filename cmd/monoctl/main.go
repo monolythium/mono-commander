@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -370,6 +372,109 @@ Examples:
 		Short: "Check monod installation status",
 		Run:   runMonodStatus,
 	}
+
+	// Docker command group
+	dockerCmd = &cobra.Command{
+		Use:   "docker",
+		Short: "Docker-based node deployment",
+		Long: `Deploy and manage Monolythium nodes using Docker containers.
+
+This is an alternative to host-native (systemd) deployment, ideal for:
+  - Development and testing environments
+  - Multi-network node operators
+  - Users who prefer container-based deployments
+  - Systems without systemd support (including macOS)
+
+Initialize a Docker deployment:
+  monoctl docker init --network Sprintnet
+
+Manage the container:
+  monoctl docker up
+  monoctl docker down
+  monoctl docker restart
+  monoctl docker logs [--follow]
+  monoctl docker status
+
+Upgrade to a new version:
+  monoctl docker upgrade --version v0.2.0`,
+	}
+
+	dockerInitCmd = &cobra.Command{
+		Use:   "init",
+		Short: "Initialize Docker environment for a network",
+		Long: `Download genesis, configure peers, and generate docker-compose.yml.
+
+This command performs:
+  1. Downloads genesis.json from the network registry
+  2. Validates genesis and verifies SHA256
+  3. Downloads peers from registry
+  4. Generates docker-compose.yml with proper configuration
+
+Example:
+  monoctl docker init --network Sprintnet
+  monoctl docker init --network Sprintnet --home ~/.monod --dry-run`,
+		Run: runDockerInit,
+	}
+
+	dockerUpCmd = &cobra.Command{
+		Use:   "up",
+		Short: "Start the Docker container",
+		Long: `Start the Monolythium node container using docker-compose.
+
+Equivalent to: docker compose up -d`,
+		Run: runDockerUp,
+	}
+
+	dockerDownCmd = &cobra.Command{
+		Use:   "down",
+		Short: "Stop the Docker container",
+		Long: `Stop and remove the Monolythium node container.
+
+Equivalent to: docker compose down`,
+		Run: runDockerDown,
+	}
+
+	dockerRestartCmd = &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the Docker container",
+		Long: `Restart the Monolythium node container.
+
+Equivalent to: docker compose restart`,
+		Run: runDockerRestart,
+	}
+
+	dockerLogsCmd = &cobra.Command{
+		Use:   "logs",
+		Short: "View container logs",
+		Long: `View logs from the Monolythium node container.
+
+Equivalent to: docker compose logs [-f]`,
+		Run: runDockerLogs,
+	}
+
+	dockerStatusCmd = &cobra.Command{
+		Use:   "status",
+		Short: "Show container status",
+		Long: `Show the status of the Monolythium node container.
+
+Displays container state, uptime, and basic health information.`,
+		Run: runDockerStatus,
+	}
+
+	dockerUpgradeCmd = &cobra.Command{
+		Use:   "upgrade",
+		Short: "Upgrade to a new version",
+		Long: `Upgrade the Monolythium node to a new Docker image version.
+
+This command:
+  1. Pulls the new image version
+  2. Updates docker-compose.yml
+  3. Restarts the container with the new image
+
+Example:
+  monoctl docker upgrade --version v0.2.0`,
+		Run: runDockerUpgrade,
+	}
 )
 
 func init() {
@@ -582,6 +687,37 @@ func init() {
 
 	// Doctor command (no flags needed)
 	rootCmd.AddCommand(doctorCmd)
+
+	// Docker commands
+	dockerInitCmd.Flags().String("network", "", "Network to join (Sprintnet, Testnet, Mainnet)")
+	dockerInitCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	dockerInitCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	dockerInitCmd.MarkFlagRequired("network")
+	dockerCmd.AddCommand(dockerInitCmd)
+
+	dockerUpCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	dockerCmd.AddCommand(dockerUpCmd)
+
+	dockerDownCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	dockerCmd.AddCommand(dockerDownCmd)
+
+	dockerRestartCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	dockerCmd.AddCommand(dockerRestartCmd)
+
+	dockerLogsCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	dockerLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	dockerLogsCmd.Flags().IntP("lines", "n", 100, "Number of lines to show")
+	dockerCmd.AddCommand(dockerLogsCmd)
+
+	dockerStatusCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	dockerCmd.AddCommand(dockerStatusCmd)
+
+	dockerUpgradeCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	dockerUpgradeCmd.Flags().String("version", "", "Version tag to upgrade to (e.g., v0.2.0)")
+	dockerUpgradeCmd.MarkFlagRequired("version")
+	dockerCmd.AddCommand(dockerUpgradeCmd)
+
+	rootCmd.AddCommand(dockerCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -782,8 +918,9 @@ func runPeersUpdate(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	seeds := reg.Seeds
 	peers := core.MergePeers(reg.Peers, reg.PersistentPeers)
-	patch := core.GenerateConfigPatch(netCfg, peers)
+	patch := core.GenerateConfigPatch(seeds, peers)
 	patchPath, content, err := core.WriteConfigPatch(home, patch, dryRun)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
@@ -811,6 +948,15 @@ func runPeersUpdate(cmd *cobra.Command, args []string) {
 }
 
 func runSystemdInstall(cmd *cobra.Command, args []string) {
+	// Check if systemd is available (Linux only)
+	if runtime.GOOS != "linux" {
+		fmt.Fprintf(os.Stderr, "Error: systemd is only available on Linux\n")
+		fmt.Fprintf(os.Stderr, "On %s, use Docker mode instead:\n", runtime.GOOS)
+		fmt.Fprintf(os.Stderr, "  monoctl docker init --network <network>\n")
+		fmt.Fprintf(os.Stderr, "  monoctl docker up\n")
+		os.Exit(1)
+	}
+
 	networkStr, _ := cmd.Flags().GetString("network")
 	home, _ := cmd.Flags().GetString("home")
 	user, _ := cmd.Flags().GetString("user")
@@ -823,10 +969,16 @@ func runSystemdInstall(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Ensure home is an absolute path (no ~ or relative paths)
 	if home == "" {
 		homeDir, _ := os.UserHomeDir()
-		home = homeDir + "/.monod"
+		home = filepath.Join(homeDir, ".monod")
+	} else if strings.HasPrefix(home, "~") {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, strings.TrimPrefix(home, "~"))
 	}
+	// Convert to absolute path
+	home, _ = filepath.Abs(home)
 
 	cfg := oshelpers.DefaultSystemdConfig(string(network), user, home)
 	cfg.UseCosmovisor = useCosmovisor
@@ -2369,4 +2521,318 @@ func promptPassword(prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(password), nil
+}
+
+// Docker command handlers
+
+func runDockerInit(cmd *cobra.Command, args []string) {
+	networkName, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	// Resolve home directory
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, ".monod")
+	} else if strings.HasPrefix(home, "~") {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, strings.TrimPrefix(home, "~"))
+	}
+	home, _ = filepath.Abs(home)
+
+	network, err := core.GetNetwork(core.NetworkName(networkName))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid network %s: %v\n", networkName, err)
+		os.Exit(1)
+	}
+
+	// Create logger
+	logger := slog.Default()
+
+	// Step 1: Run join to download genesis and configure peers
+	fmt.Println("Docker Init: " + networkName)
+	if dryRun {
+		fmt.Println("(DRY RUN - no changes will be made)")
+	}
+	fmt.Println()
+
+	joinOpts := core.JoinOptions{
+		Network: network.Name,
+		Home:    home,
+		DryRun:  dryRun,
+		Logger:  logger,
+	}
+
+	fetcher := net.NewHTTPFetcher()
+	result, err := core.Join(joinOpts, fetcher)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error during join: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print join steps
+	for _, step := range result.Steps {
+		status := "[+]"
+		if step.Status == "failed" {
+			status = "[X]"
+		} else if step.Status == "skipped" {
+			status = "[-]"
+		}
+		msg := step.Name
+		if step.Message != "" {
+			msg += ": " + step.Message
+		}
+		fmt.Printf("%s %s\n", status, msg)
+	}
+
+	// Step 2: Generate docker-compose.yml
+	fmt.Println()
+	fmt.Println("[+] Generating docker-compose.yml")
+
+	composeContent := generateDockerCompose(network, home, result.ConfigPatch)
+	composePath := filepath.Join(home, "docker-compose.yml")
+
+	if dryRun {
+		fmt.Printf("Would write to: %s\n", composePath)
+		fmt.Println("\nContent preview:")
+		fmt.Println(composeContent)
+	} else {
+		// Ensure directory exists
+		if err := os.MkdirAll(home, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating directory: %v\n", err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(composePath, []byte(composeContent), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing docker-compose.yml: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Written to: %s\n", composePath)
+	}
+
+	fmt.Println()
+	fmt.Println("Docker environment initialized!")
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Printf("  cd %s\n", home)
+	fmt.Println("  monoctl docker up")
+}
+
+func runDockerUp(cmd *cobra.Command, args []string) {
+	home := getDockerHome(cmd)
+	composePath := filepath.Join(home, "docker-compose.yml")
+
+	if _, err := os.Stat(composePath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: docker-compose.yml not found at %s\n", composePath)
+		fmt.Fprintf(os.Stderr, "Run 'monoctl docker init --network <network>' first\n")
+		os.Exit(1)
+	}
+
+	fmt.Println("Starting container...")
+	if err := runDockerCompose(home, "up", "-d"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Container started successfully")
+}
+
+func runDockerDown(cmd *cobra.Command, args []string) {
+	home := getDockerHome(cmd)
+
+	fmt.Println("Stopping container...")
+	if err := runDockerCompose(home, "down"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Container stopped")
+}
+
+func runDockerRestart(cmd *cobra.Command, args []string) {
+	home := getDockerHome(cmd)
+
+	fmt.Println("Restarting container...")
+	if err := runDockerCompose(home, "restart"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Container restarted")
+}
+
+func runDockerLogs(cmd *cobra.Command, args []string) {
+	home := getDockerHome(cmd)
+	follow, _ := cmd.Flags().GetBool("follow")
+	lines, _ := cmd.Flags().GetInt("lines")
+
+	dockerArgs := []string{"logs", fmt.Sprintf("--tail=%d", lines)}
+	if follow {
+		dockerArgs = append(dockerArgs, "-f")
+	}
+
+	if err := runDockerCompose(home, dockerArgs...); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runDockerStatus(cmd *cobra.Command, args []string) {
+	home := getDockerHome(cmd)
+	composePath := filepath.Join(home, "docker-compose.yml")
+
+	if _, err := os.Stat(composePath); os.IsNotExist(err) {
+		fmt.Println("Status: NOT INITIALIZED")
+		fmt.Printf("No docker-compose.yml found at %s\n", home)
+		return
+	}
+
+	fmt.Printf("Docker Compose: %s\n", composePath)
+	fmt.Println()
+
+	if err := runDockerCompose(home, "ps"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runDockerUpgrade(cmd *cobra.Command, args []string) {
+	home := getDockerHome(cmd)
+	version, _ := cmd.Flags().GetString("version")
+
+	composePath := filepath.Join(home, "docker-compose.yml")
+	if _, err := os.Stat(composePath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: docker-compose.yml not found at %s\n", composePath)
+		os.Exit(1)
+	}
+
+	// Read existing compose file to get current config
+	content, err := os.ReadFile(composePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading docker-compose.yml: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Update image version in compose file
+	oldImage := "monolythium/monod:latest"
+	newImage := fmt.Sprintf("monolythium/monod:%s", version)
+	newContent := strings.ReplaceAll(string(content), oldImage, newImage)
+
+	// Also handle if there's already a versioned image
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "image: monolythium/monod:") {
+			lines[i] = fmt.Sprintf("    image: %s", newImage)
+		}
+	}
+	newContent = strings.Join(lines, "\n")
+
+	fmt.Printf("Upgrading to version: %s\n", version)
+
+	// Write updated compose file
+	if err := os.WriteFile(composePath, []byte(newContent), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing docker-compose.yml: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Pull new image
+	fmt.Println("Pulling new image...")
+	if err := runDockerCompose(home, "pull"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error pulling image: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Restart with new image
+	fmt.Println("Restarting container...")
+	if err := runDockerCompose(home, "up", "-d"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error restarting: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Upgraded to %s successfully\n", version)
+}
+
+// Helper functions for Docker commands
+
+func getDockerHome(cmd *cobra.Command) string {
+	home, _ := cmd.Flags().GetString("home")
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, ".monod")
+	} else if strings.HasPrefix(home, "~") {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, strings.TrimPrefix(home, "~"))
+	}
+	home, _ = filepath.Abs(home)
+	return home
+}
+
+func runDockerCompose(workDir string, args ...string) error {
+	// Try docker compose (v2) first, fall back to docker-compose (v1)
+	fullArgs := append([]string{"compose"}, args...)
+
+	cmd := exec.Command("docker", fullArgs...)
+	cmd.Dir = workDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		// Try docker-compose as fallback
+		cmd = exec.Command("docker-compose", args...)
+		cmd.Dir = workDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+	return nil
+}
+
+func generateDockerCompose(network core.Network, home, configPatch string) string {
+	// Extract seeds and persistent_peers from config patch if available
+	var seeds, persistentPeers string
+	for _, line := range strings.Split(configPatch, "\n") {
+		if strings.HasPrefix(line, "seeds = ") {
+			seeds = strings.Trim(strings.TrimPrefix(line, "seeds = "), "\"")
+		}
+		if strings.HasPrefix(line, "persistent_peers = ") {
+			persistentPeers = strings.Trim(strings.TrimPrefix(line, "persistent_peers = "), "\"")
+		}
+	}
+
+	// Build environment variables
+	var envVars strings.Builder
+	if seeds != "" {
+		envVars.WriteString(fmt.Sprintf("      - MONOD_P2P_SEEDS=%s\n", seeds))
+	}
+	if persistentPeers != "" {
+		envVars.WriteString(fmt.Sprintf("      - MONOD_P2P_PERSISTENT_PEERS=%s\n", persistentPeers))
+	}
+
+	template := `# Monolythium Node Docker Compose
+# Network: %s
+# Generated by monoctl
+
+services:
+  monod:
+    image: monolythium/monod:latest
+    container_name: monod-%s
+    restart: unless-stopped
+    volumes:
+      - %s:/root/.monod
+    ports:
+      - "26656:26656"  # P2P
+      - "26657:26657"  # RPC
+      - "1317:1317"    # REST API
+      - "9090:9090"    # gRPC
+      - "8545:8545"    # EVM JSON-RPC
+      - "8546:8546"    # EVM WebSocket
+    environment:
+      - MONOD_CHAIN_ID=%s
+%s    command: start --home /root/.monod
+`
+
+	return fmt.Sprintf(template,
+		network.Name,
+		strings.ToLower(string(network.Name)),
+		home,
+		network.ChainID,
+		envVars.String(),
+	)
 }

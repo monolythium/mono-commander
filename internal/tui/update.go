@@ -228,6 +228,11 @@ func (m Model) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// Handle mode selection
+	if m.subView == SubViewModeSelect {
+		return m.handleModeSelectKey(msg)
+	}
+
 	// Handle form input if in form mode
 	if m.subView == SubViewForm && len(m.formFields) > 0 {
 		return m.handleFormInput(msg)
@@ -326,6 +331,44 @@ func (m Model) handleFormInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.formFields[m.formIndex].Input, cmd = m.formFields[m.formIndex].Input.Update(msg)
 		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m Model) handleModeSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "q", "ctrl+c":
+		m.cancel()
+		return m, tea.Quit
+
+	case "up", "k":
+		if m.modeSelectIndex > 0 {
+			m.modeSelectIndex--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.modeSelectIndex < len(m.modeSelectOptions)-1 {
+			m.modeSelectIndex++
+		}
+		return m, nil
+
+	case "enter", " ":
+		// Save selected mode
+		if m.modeSelectIndex < len(m.modeSelectOptions) {
+			selectedMode := m.modeSelectOptions[m.modeSelectIndex]
+			m.deploymentMode = selectedMode
+			m.config.DeploymentMode = selectedMode
+			SaveConfig(m.config)
+
+			// Exit mode selection, return to dashboard
+			m.subView = SubViewNone
+			return m, m.refreshDashboard()
+		}
+		return m, nil
 	}
 
 	return m, nil

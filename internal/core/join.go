@@ -101,6 +101,7 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 	}
 
 	var genesisSHA string
+	var seeds []Peer
 	var persistentPeers []Peer
 
 	if peersURL != "" {
@@ -126,10 +127,12 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 					result.Steps[len(result.Steps)-1].Message = msg
 					logger.Warn("peers registry validation failed", "error", msg)
 				} else {
+					// Use seeds from registry (all must be node_id@host:port format)
+					seeds = reg.Seeds
 					persistentPeers = MergePeers(reg.Peers, reg.PersistentPeers)
 					genesisSHA = reg.GenesisSHA
 					result.Steps[len(result.Steps)-1].Status = "success"
-					result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("%d peers", len(persistentPeers))
+					result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("%d seeds, %d peers", len(seeds), len(persistentPeers))
 				}
 			}
 		}
@@ -179,7 +182,7 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 	logger.Info("generating config patch")
 	result.Steps = append(result.Steps, JoinStep{Name: "Generate config", Status: "pending"})
 
-	patch := GenerateConfigPatch(network, persistentPeers)
+	patch := GenerateConfigPatch(seeds, persistentPeers)
 	patchPath, patchContent, err := WriteConfigPatch(opts.Home, patch, opts.DryRun)
 	if err != nil {
 		result.Steps[len(result.Steps)-1].Status = "failed"

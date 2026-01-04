@@ -13,6 +13,11 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
+	// Special case: if deployment mode selection is active, show that instead
+	if m.subView == SubViewModeSelect {
+		return m.renderModeSelect()
+	}
+
 	var b strings.Builder
 
 	// Get current state for branding header
@@ -1218,5 +1223,119 @@ func (m Model) renderWalletResult() string {
 	b.WriteString("  ")
 	b.WriteString(TextMuted.Render("Press Esc or Enter to return to Tools"))
 
+	return b.String()
+}
+
+// renderModeSelect renders the deployment mode selection screen
+func (m Model) renderModeSelect() string {
+	var b strings.Builder
+
+	// Centered container
+	containerWidth := 60
+	if m.width > 0 && m.width < containerWidth {
+		containerWidth = m.width - 4
+	}
+
+	// Title
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("99")).
+		MarginBottom(1).
+		Render("MONO COMMANDER")
+
+	subtitle := TextMuted.Render("Welcome! Let's get started.")
+
+	// Mode descriptions
+	modes := []struct {
+		mode DeploymentMode
+		name string
+		desc string
+		icon string
+	}{
+		{
+			mode: DeployModeHostNative,
+			name: "Host-Native (systemd)",
+			desc: "Install monod directly on Linux with systemd process management.\nBest for production validators and persistent deployments.",
+			icon: "🖥️",
+		},
+		{
+			mode: DeployModeDocker,
+			name: "Docker",
+			desc: "Run monod in a Docker container with docker-compose.\nIdeal for development, testing, and multi-network setups.",
+			icon: "🐳",
+		},
+	}
+
+	// Render mode options
+	var optionsBuilder strings.Builder
+	optionsBuilder.WriteString("\nSelect deployment mode:\n\n")
+
+	optionIndex := 0
+	for _, opt := range modes {
+		// Check if this mode is available
+		available := false
+		for _, m := range m.modeSelectOptions {
+			if m == opt.mode {
+				available = true
+				break
+			}
+		}
+		if !available {
+			continue
+		}
+
+		// Style based on selection
+		selected := optionIndex == m.modeSelectIndex
+		optionIndex++
+
+		prefix := "  "
+		nameStyle := TextMuted
+		if selected {
+			prefix = "▸ "
+			nameStyle = TextAction.Copy().Bold(true)
+		}
+
+		optionsBuilder.WriteString(prefix)
+		optionsBuilder.WriteString(opt.icon)
+		optionsBuilder.WriteString(" ")
+		optionsBuilder.WriteString(nameStyle.Render(opt.name))
+		optionsBuilder.WriteString("\n")
+
+		// Description (indented)
+		for _, line := range strings.Split(opt.desc, "\n") {
+			optionsBuilder.WriteString("     ")
+			optionsBuilder.WriteString(TextMuted.Render(line))
+			optionsBuilder.WriteString("\n")
+		}
+		optionsBuilder.WriteString("\n")
+	}
+
+	// Footer hints
+	hints := TextMuted.Render("↑/↓ to select • Enter to confirm • q to quit")
+
+	// Build the card
+	content := lipgloss.JoinVertical(
+		lipgloss.Center,
+		title,
+		subtitle,
+		optionsBuilder.String(),
+		hints,
+	)
+
+	card := CardStyle.
+		Width(containerWidth).
+		Padding(2, 3).
+		Render(content)
+
+	// Center on screen
+	centeredCard := lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		card,
+	)
+
+	b.WriteString(centeredCard)
 	return b.String()
 }

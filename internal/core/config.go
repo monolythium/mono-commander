@@ -29,10 +29,12 @@ persistent_peers = "{{ .PersistentPeers }}"
 `
 
 // GenerateConfigPatch generates a config patch for the given network and peers.
-func GenerateConfigPatch(network Network, peers []Peer) *ConfigPatch {
+// Seeds and persistent_peers MUST be in node_id@host:port format.
+// The registry is the source of truth for all peer entries.
+func GenerateConfigPatch(seeds []Peer, persistentPeers []Peer) *ConfigPatch {
 	return &ConfigPatch{
-		Seeds:           network.SeedString(26656),
-		PersistentPeers: PeersToString(peers),
+		Seeds:           PeersToString(seeds),
+		PersistentPeers: PeersToString(persistentPeers),
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -64,6 +65,8 @@ type SubView int
 
 const (
 	SubViewNone SubView = iota
+	// Mode selection (first-run)
+	SubViewModeSelect
 	// Dashboard subviews
 	SubViewNetworkSelect
 	// Health subviews
@@ -89,10 +92,20 @@ const (
 	SubViewForm
 )
 
+// DeploymentMode represents the deployment method
+type DeploymentMode string
+
+const (
+	DeployModeUnset      DeploymentMode = ""
+	DeployModeHostNative DeploymentMode = "host-native"
+	DeployModeDocker     DeploymentMode = "docker"
+)
+
 // Config holds user preferences
 type Config struct {
-	SelectedNetwork string `json:"selected_network"`
-	LastUpdated     string `json:"last_updated"`
+	SelectedNetwork string         `json:"selected_network"`
+	DeploymentMode  DeploymentMode `json:"deployment_mode"`
+	LastUpdated     string         `json:"last_updated"`
 }
 
 // LoadConfig loads the user config from disk
@@ -166,6 +179,11 @@ type Model struct {
 	// Screen dimensions
 	width  int
 	height int
+
+	// Deployment mode selection
+	deploymentMode    DeploymentMode
+	modeSelectIndex   int
+	modeSelectOptions []DeploymentMode
 
 	// User config
 	config          *Config
@@ -393,24 +411,53 @@ func NewModel() Model {
 	// Create context for cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Determine deployment mode options based on platform
+	var modeOptions []DeploymentMode
+	if runtime.GOOS == "darwin" {
+		// macOS: only Docker mode available (no systemd)
+		modeOptions = []DeploymentMode{DeployModeDocker}
+	} else {
+		// Linux: both modes available
+		modeOptions = []DeploymentMode{DeployModeHostNative, DeployModeDocker}
+	}
+
+	// Check if deployment mode needs to be selected
+	deployMode := cfg.DeploymentMode
+	initialSubView := SubViewNone
+
+	// If on macOS and mode is unset or host-native, force Docker
+	if runtime.GOOS == "darwin" && (deployMode == DeployModeUnset || deployMode == DeployModeHostNative) {
+		deployMode = DeployModeDocker
+		cfg.DeploymentMode = DeployModeDocker
+		SaveConfig(cfg)
+	}
+
+	// If mode is unset, show mode selection
+	if deployMode == DeployModeUnset {
+		initialSubView = SubViewModeSelect
+	}
+
 	return Model{
-		activeTab:       TabDashboard,
-		tabs:            AllTabs(),
-		config:          cfg,
-		selectedNetwork: network,
-		networks:        core.ListNetworks(),
-		list:            l,
-		spinner:         s,
-		formResult:      make(map[string]string),
-		subView:         SubViewNone,
-		ctx:             ctx,
-		cancel:          cancel,
-		dashboardData:   &DashboardData{},
-		healthData:      &HealthData{},
-		logsData:        &LogsData{Lines: 50},
-		updateData:      &UpdateData{CommanderCurrent: Version},
-		installData:     &InstallData{},
-		toolsData:       &ToolsData{},
+		activeTab:         TabDashboard,
+		tabs:              AllTabs(),
+		config:            cfg,
+		selectedNetwork:   network,
+		networks:          core.ListNetworks(),
+		deploymentMode:    deployMode,
+		modeSelectIndex:   0,
+		modeSelectOptions: modeOptions,
+		list:              l,
+		spinner:           s,
+		formResult:        make(map[string]string),
+		subView:           initialSubView,
+		ctx:               ctx,
+		cancel:            cancel,
+		dashboardData:     &DashboardData{},
+		healthData:        &HealthData{},
+		logsData:          &LogsData{Lines: 50},
+		updateData:        &UpdateData{CommanderCurrent: Version},
+		installData:       &InstallData{},
+		toolsData:         &ToolsData{},
 	}
 }
 
