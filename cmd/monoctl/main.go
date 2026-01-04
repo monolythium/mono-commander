@@ -7,13 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	gonet "net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/monolythium/mono-commander/internal/core"
 	"github.com/monolythium/mono-commander/internal/logs"
@@ -100,6 +104,32 @@ Or use CLI commands:
 		Use:   "update",
 		Short: "Update peers from registry",
 		Run:   runPeersUpdate,
+	}
+
+	peersValidateCmd = &cobra.Command{
+		Use:   "validate <peers_string_or_file>",
+		Short: "Validate peer address format and reachability",
+		Long: `Validate peer addresses for correct format and optional connectivity.
+
+Peer format: nodeID@host:port
+  - nodeID: 40-character lowercase hex string
+  - host: IP address or hostname
+  - port: valid port number (1-65535)
+
+Examples:
+  # Validate a single peer
+  monoctl peers validate "339b1bbca725378e640f932ee0b8cd51cc638c73@95.217.191.120:26656"
+
+  # Validate multiple peers (comma-separated)
+  monoctl peers validate "node1@host1:26656,node2@host2:26656"
+
+  # Validate from file (one peer per line)
+  monoctl peers validate /path/to/peers.txt
+
+  # Check connectivity (DNS + TCP)
+  monoctl peers validate --check-connectivity "node@host:26656"`,
+		Args: cobra.ExactArgs(1),
+		Run:  runPeersValidate,
 	}
 
 	// Systemd command
@@ -517,6 +547,11 @@ func init() {
 	peersUpdateCmd.Flags().Bool("dry-run", false, "Show what would be done")
 	peersUpdateCmd.MarkFlagRequired("network")
 	peersCmd.AddCommand(peersUpdateCmd)
+
+	// Peers validate command flags
+	peersValidateCmd.Flags().Bool("check-connectivity", false, "Check DNS resolution and TCP connectivity")
+	peersCmd.AddCommand(peersValidateCmd)
+
 	rootCmd.AddCommand(peersCmd)
 
 	// Systemd subcommands
@@ -2421,23 +2456,91 @@ func runDoctor(cmd *cobra.Command, args []string) {
 	homeDir, _ := os.UserHomeDir()
 
 	if jsonOutput {
+		// Detect deployment mode
+		deployMode := "host-native"
+		nodeHome := filepath.Join(homeDir, ".monod")
+		if _, err := os.Stat(filepath.Join(nodeHome, "docker-compose.yml")); err == nil {
+			deployMode = "docker"
+		}
+
+		// Load commander config for network info
+		cfgPath := filepath.Join(homeDir, ".mono-commander", "config.json")
+		var network string
+		var rpcEndpoint string
+		if data, err := os.ReadFile(cfgPath); err == nil {
+			var cfg map[string]interface{}
+			if json.Unmarshal(data, &cfg) == nil {
+				if n, ok := cfg["selected_network"].(string); ok {
+					network = n
+				}
+			}
+		}
+		if network == "" {
+			network = "unknown"
+		}
+
+		// Determine RPC endpoint
+		rpcEndpoint = "http://localhost:26657"
+		if deployMode == "docker" {
+			rpcEndpoint = "http://localhost:26657"
+		}
+
+		// Check RPC status
+		rpcReachable := false
+		var height int64
+		var catchingUp bool
+		var peerCount int
+
+		conn, _ := gonet.DialTimeout("tcp", "localhost:26657", 3*time.Second)
+		if conn != nil {
+			conn.Close()
+			rpcReachable = true
+			// Try to get status from RPC
+			opts := core.StatusOptions{
+				Endpoints: core.Endpoints{
+					CometRPC: rpcEndpoint,
+				},
+			}
+			if status, err := core.GetNodeStatus(opts); err == nil {
+				height = status.LatestHeight
+				catchingUp = status.CatchingUp
+				peerCount = status.PeersCount
+			}
+		}
+
+		// Check installation status
+		monodInstalled := false
+		monodUserPath := filepath.Join(homeDir, ".local", "bin", "monod")
+		monodSysPath := "/usr/local/bin/monod"
+		if _, err := os.Stat(monodUserPath); err == nil {
+			monodInstalled = true
+		} else if _, err := os.Stat(monodSysPath); err == nil {
+			monodInstalled = true
+		}
+
+		nodeHomeExists := false
+		if _, err := os.Stat(nodeHome); err == nil {
+			nodeHomeExists = true
+		}
+
 		out := map[string]interface{}{
-			"deployment_mode": "host-native",
-			"container_mode":  false,
-			"process_manager": "systemd",
+			"deployment_mode": deployMode,
+			"network":         network,
+			"rpc_endpoint":    rpcEndpoint,
+			"rpc_reachable":   rpcReachable,
+			"height":          height,
+			"catching_up":     catchingUp,
+			"peer_count":      peerCount,
+			"status": map[string]bool{
+				"monod_installed":   monodInstalled,
+				"node_home_exists":  nodeHomeExists,
+			},
 			"locations": map[string]string{
-				"monod_user":       filepath.Join(homeDir, ".local", "bin", "monod"),
-				"monod_system":     "/usr/local/bin/monod",
-				"node_home":        filepath.Join(homeDir, ".monod"),
+				"monod_user":       monodUserPath,
+				"monod_system":     monodSysPath,
+				"node_home":        nodeHome,
 				"commander_config": filepath.Join(homeDir, ".mono-commander"),
 				"systemd_units":    "/etc/systemd/system/",
-			},
-			"commands": map[string]string{
-				"monod install":  "Downloads pre-built binary to ~/.local/bin/monod",
-				"join":           "Writes genesis.json and config patch to ~/.monod/config/",
-				"systemd install": "Creates systemd unit file in /etc/systemd/system/",
-				"mesh enable":    "Creates mesh config and systemd unit",
-				"wallet generate": "Creates encrypted keystore in ~/.mono-commander/wallets/",
 			},
 		}
 		data, _ := json.MarshalIndent(out, "", "  ")
@@ -2848,4 +2951,149 @@ services:
 		network.ChainID,
 		envVars.String(),
 	)
+}
+
+// PeerValidationResult holds the result of validating a single peer
+type PeerValidationResult struct {
+	Peer          string `json:"peer"`
+	Valid         bool   `json:"valid"`
+	NodeID        string `json:"node_id,omitempty"`
+	Host          string `json:"host,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	Error         string `json:"error,omitempty"`
+	DNSResolved   *bool  `json:"dns_resolved,omitempty"`
+	TCPReachable  *bool  `json:"tcp_reachable,omitempty"`
+	ReachableNote string `json:"reachable_note,omitempty"`
+}
+
+// peerRegex validates nodeID@host:port format
+var peerRegex = regexp.MustCompile(`^([a-f0-9]{40})@([a-zA-Z0-9.\-]+):(\d+)$`)
+
+func runPeersValidate(cmd *cobra.Command, args []string) {
+	input := args[0]
+	checkConn, _ := cmd.Flags().GetBool("check-connectivity")
+
+	var peers []string
+
+	// Check if input is a file
+	if _, err := os.Stat(input); err == nil {
+		data, err := os.ReadFile(input)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+			os.Exit(1)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				peers = append(peers, line)
+			}
+		}
+	} else {
+		// Treat as comma-separated string
+		for _, p := range strings.Split(input, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				peers = append(peers, p)
+			}
+		}
+	}
+
+	if len(peers) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no peers to validate\n")
+		os.Exit(1)
+	}
+
+	var results []PeerValidationResult
+	allValid := true
+
+	for _, peer := range peers {
+		result := validatePeer(peer, checkConn)
+		results = append(results, result)
+		if !result.Valid {
+			allValid = false
+		}
+	}
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(results, "", "  ")
+		fmt.Println(string(data))
+	} else {
+		fmt.Printf("Validating %d peer(s)...\n\n", len(peers))
+		for _, r := range results {
+			if r.Valid {
+				fmt.Printf("✓ %s\n", r.Peer)
+				fmt.Printf("  NodeID: %s\n", r.NodeID)
+				fmt.Printf("  Host:   %s\n", r.Host)
+				fmt.Printf("  Port:   %d\n", r.Port)
+				if r.DNSResolved != nil {
+					if *r.DNSResolved {
+						fmt.Printf("  DNS:    resolved\n")
+					} else {
+						fmt.Printf("  DNS:    FAILED to resolve\n")
+					}
+				}
+				if r.TCPReachable != nil {
+					if *r.TCPReachable {
+						fmt.Printf("  TCP:    reachable\n")
+					} else {
+						fmt.Printf("  TCP:    NOT reachable (%s)\n", r.ReachableNote)
+					}
+				}
+			} else {
+				fmt.Printf("✗ %s\n", r.Peer)
+				fmt.Printf("  Error: %s\n", r.Error)
+			}
+			fmt.Println()
+		}
+
+		if allValid {
+			fmt.Println("All peers are valid.")
+		} else {
+			fmt.Println("Some peers have errors.")
+			os.Exit(1)
+		}
+	}
+}
+
+func validatePeer(peer string, checkConn bool) PeerValidationResult {
+	result := PeerValidationResult{Peer: peer}
+
+	matches := peerRegex.FindStringSubmatch(peer)
+	if matches == nil {
+		result.Valid = false
+		result.Error = "invalid format: expected nodeID@host:port (nodeID must be 40 hex chars)"
+		return result
+	}
+
+	result.NodeID = matches[1]
+	result.Host = matches[2]
+	port, err := strconv.Atoi(matches[3])
+	if err != nil || port < 1 || port > 65535 {
+		result.Valid = false
+		result.Error = fmt.Sprintf("invalid port: %s (must be 1-65535)", matches[3])
+		return result
+	}
+	result.Port = port
+	result.Valid = true
+
+	if checkConn {
+		// DNS resolution check
+		_, err := gonet.LookupHost(result.Host)
+		dnsOk := err == nil
+		result.DNSResolved = &dnsOk
+
+		// TCP connectivity check (3 second timeout)
+		addr := fmt.Sprintf("%s:%d", result.Host, result.Port)
+		conn, err := gonet.DialTimeout("tcp", addr, 3*time.Second)
+		tcpOk := err == nil
+		result.TCPReachable = &tcpOk
+		if err != nil {
+			result.ReachableNote = err.Error()
+		}
+		if conn != nil {
+			conn.Close()
+		}
+	}
+
+	return result
 }
