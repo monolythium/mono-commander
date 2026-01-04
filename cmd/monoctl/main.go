@@ -320,6 +320,22 @@ Shows:
 		Run: runWalletInfo,
 	}
 
+	// Doctor command - explains deployment mode
+	doctorCmd = &cobra.Command{
+		Use:   "doctor",
+		Short: "Explain deployment mode and check configuration",
+		Long: `Show what mode Commander operates in and what artifacts it creates.
+
+This command helps clarify that Commander uses host-native execution (no Docker)
+and generates systemd units for process management.
+
+Use this command to understand:
+  - Deployment mode (host-native vs containerized)
+  - File locations (binaries, configs, data)
+  - What each command creates`,
+		Run: runDoctor,
+	}
+
 	// Monod command group
 	monodCmd = &cobra.Command{
 		Use:   "monod",
@@ -563,6 +579,9 @@ func init() {
 	monodCmd.AddCommand(monodStatusCmd)
 
 	rootCmd.AddCommand(monodCmd)
+
+	// Doctor command (no flags needed)
+	rootCmd.AddCommand(doctorCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -2227,6 +2246,105 @@ func runMonodStatus(cmd *cobra.Command, args []string) {
 		fmt.Println("To install, run:")
 		fmt.Println("  monoctl monod install")
 	}
+}
+
+// =============================================================================
+// Doctor Command
+// =============================================================================
+
+func runDoctor(cmd *cobra.Command, args []string) {
+	homeDir, _ := os.UserHomeDir()
+
+	if jsonOutput {
+		out := map[string]interface{}{
+			"deployment_mode": "host-native",
+			"container_mode":  false,
+			"process_manager": "systemd",
+			"locations": map[string]string{
+				"monod_user":       filepath.Join(homeDir, ".local", "bin", "monod"),
+				"monod_system":     "/usr/local/bin/monod",
+				"node_home":        filepath.Join(homeDir, ".monod"),
+				"commander_config": filepath.Join(homeDir, ".mono-commander"),
+				"systemd_units":    "/etc/systemd/system/",
+			},
+			"commands": map[string]string{
+				"monod install":  "Downloads pre-built binary to ~/.local/bin/monod",
+				"join":           "Writes genesis.json and config patch to ~/.monod/config/",
+				"systemd install": "Creates systemd unit file in /etc/systemd/system/",
+				"mesh enable":    "Creates mesh config and systemd unit",
+				"wallet generate": "Creates encrypted keystore in ~/.mono-commander/wallets/",
+			},
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	fmt.Println("Mono Commander - Deployment Mode")
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println()
+
+	fmt.Println("DEPLOYMENT MODE")
+	fmt.Println(strings.Repeat("-", 40))
+	fmt.Println("  Mode:            HOST-NATIVE")
+	fmt.Println("  Container:       NO (no Docker/docker-compose)")
+	fmt.Println("  Process Manager: systemd (Linux)")
+	fmt.Println()
+
+	fmt.Println("FILE LOCATIONS")
+	fmt.Println(strings.Repeat("-", 40))
+	fmt.Printf("  monod binary (user):   %s\n", filepath.Join(homeDir, ".local", "bin", "monod"))
+	fmt.Printf("  monod binary (system): /usr/local/bin/monod\n")
+	fmt.Printf("  Node home:             %s\n", filepath.Join(homeDir, ".monod"))
+	fmt.Printf("  Commander config:      %s\n", filepath.Join(homeDir, ".mono-commander"))
+	fmt.Printf("  Systemd units:         /etc/systemd/system/\n")
+	fmt.Println()
+
+	fmt.Println("COMMAND → ARTIFACT MAPPING")
+	fmt.Println(strings.Repeat("-", 40))
+	fmt.Println("  monoctl monod install   → ~/.local/bin/monod")
+	fmt.Println("  monoctl join            → ~/.monod/config/genesis.json")
+	fmt.Println("                          → ~/.monod/config/config-patch.toml")
+	fmt.Println("  monoctl systemd install → /etc/systemd/system/monod-<network>.service")
+	fmt.Println("  monoctl mesh enable     → ~/.mono-commander/mesh-<network>.toml")
+	fmt.Println("                          → /etc/systemd/system/mesh-<network>.service")
+	fmt.Println("  monoctl wallet generate → ~/.mono-commander/wallets/<name>.json")
+	fmt.Println()
+
+	// Check current installation status
+	fmt.Println("CURRENT STATUS")
+	fmt.Println(strings.Repeat("-", 40))
+
+	// Check monod
+	monodUserPath := filepath.Join(homeDir, ".local", "bin", "monod")
+	monodSysPath := "/usr/local/bin/monod"
+
+	if _, err := os.Stat(monodUserPath); err == nil {
+		fmt.Printf("  monod (user):   INSTALLED at %s\n", monodUserPath)
+	} else if _, err := os.Stat(monodSysPath); err == nil {
+		fmt.Printf("  monod (system): INSTALLED at %s\n", monodSysPath)
+	} else {
+		fmt.Println("  monod:          NOT INSTALLED")
+	}
+
+	// Check node home
+	nodeHome := filepath.Join(homeDir, ".monod")
+	if _, err := os.Stat(nodeHome); err == nil {
+		fmt.Printf("  Node home:      EXISTS at %s\n", nodeHome)
+	} else {
+		fmt.Println("  Node home:      NOT INITIALIZED")
+	}
+
+	// Check commander config
+	cmdConfig := filepath.Join(homeDir, ".mono-commander")
+	if _, err := os.Stat(cmdConfig); err == nil {
+		fmt.Printf("  Commander:      CONFIGURED at %s\n", cmdConfig)
+	} else {
+		fmt.Println("  Commander:      NOT CONFIGURED (will be created on first use)")
+	}
+
+	fmt.Println()
+	fmt.Println("TIP: Use --dry-run on any write command to preview changes.")
 }
 
 // promptPassword prompts for a password without echoing
