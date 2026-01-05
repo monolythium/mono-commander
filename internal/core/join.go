@@ -87,9 +87,9 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 
 	if chainID != network.ChainID {
 		result.Steps[len(result.Steps)-1].Status = "failed"
-		msg := fmt.Sprintf("chain_id mismatch: expected %s, got %s", network.ChainID, chainID)
+		msg := fmt.Sprintf("chain_id mismatch: expected %s, got %s - wrong genesis for %s, do NOT proceed", network.ChainID, chainID, network.Name)
 		result.Steps[len(result.Steps)-1].Message = msg
-		return result, fmt.Errorf("chain_id mismatch: expected %s, got %s", network.ChainID, chainID)
+		return result, fmt.Errorf("FATAL: wrong genesis for %s - expected chain_id %s, got %s. Use canonical genesis from mono-core-peers/prod", network.Name, network.ChainID, chainID)
 	}
 	result.ChainID = chainID
 	result.Steps[len(result.Steps)-1].Status = "success"
@@ -153,9 +153,9 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 
 		if actual != expectedSHA {
 			result.Steps[len(result.Steps)-1].Status = "failed"
-			msg := fmt.Sprintf("SHA256 mismatch: expected %s, got %s", expectedSHA, actual)
+			msg := fmt.Sprintf("SHA256 mismatch: expected %s, got %s - wrong genesis, do NOT proceed", expectedSHA, actual)
 			result.Steps[len(result.Steps)-1].Message = msg
-			return result, fmt.Errorf("SHA256 mismatch: expected %s, got %s", expectedSHA, actual)
+			return result, fmt.Errorf("FATAL: wrong genesis for %s - SHA256 mismatch (expected %s, got %s). Use canonical genesis from mono-core-peers/prod", opts.Network, expectedSHA, actual)
 		}
 		result.Steps[len(result.Steps)-1].Status = "success"
 	}
