@@ -3,6 +3,7 @@ package monod
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,8 +16,16 @@ import (
 
 const (
 	DefaultReleaseURL = "https://github.com/monolythium/mono-core/releases"
-	DefaultVersion    = "v1.1.2"
+	GitHubAPIURL      = "https://api.github.com/repos/monolythium/mono-core/releases/latest"
+	// FallbackVersion is used only when GitHub API is unreachable
+	FallbackVersion = "v1.1.3"
 )
+
+// GitHubRelease represents a GitHub release API response.
+type GitHubRelease struct {
+	TagName string `json:"tag_name"`
+	Name    string `json:"name"`
+}
 
 type InstallOptions struct {
 	URL           string
@@ -25,6 +34,42 @@ type InstallOptions struct {
 	UseSystemPath bool
 	Insecure      bool
 	DryRun        bool
+}
+
+// FetchLatestVersion fetches the latest monod version from GitHub releases.
+// Returns the version tag (e.g., "v1.1.3") or FallbackVersion if API fails.
+func FetchLatestVersion() (string, error) {
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
+
+	req, err := http.NewRequest(http.MethodGet, GitHubAPIURL, nil)
+	if err != nil {
+		return FallbackVersion, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "mono-commander")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return FallbackVersion, fmt.Errorf("failed to fetch latest release: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return FallbackVersion, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var release GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return FallbackVersion, fmt.Errorf("failed to parse release: %w", err)
+	}
+
+	if release.TagName == "" {
+		return FallbackVersion, fmt.Errorf("empty tag name in release")
+	}
+
+	return release.TagName, nil
 }
 
 type InstallResult struct {
@@ -48,11 +93,26 @@ func Install(opts InstallOptions) *InstallResult {
 		Steps: make([]InstallStep, 0),
 	}
 
-	result.Steps = append(result.Steps, InstallStep{Name: "Validate options", Status: "pending"})
+	result.Steps = append(result.Steps, InstallStep{Name: "Fetch latest version", Status: "pending"})
 
 	if opts.Version == "" {
-		opts.Version = DefaultVersion
+		// Auto-detect latest version from GitHub releases
+		latestVersion, err := FetchLatestVersion()
+		if err != nil {
+			// Log the error but continue with fallback version
+			result.Steps[len(result.Steps)-1].Status = "success"
+			result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("Using %s (API: %v)", latestVersion, err)
+		} else {
+			result.Steps[len(result.Steps)-1].Status = "success"
+			result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("Latest: %s", latestVersion)
+		}
+		opts.Version = latestVersion
+	} else {
+		result.Steps[len(result.Steps)-1].Status = "success"
+		result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("Specified: %s", opts.Version)
 	}
+
+	result.Steps = append(result.Steps, InstallStep{Name: "Validate options", Status: "pending"})
 
 	osArch, err := detectOSArch()
 	if err != nil {
