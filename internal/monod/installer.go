@@ -15,7 +15,7 @@ import (
 
 const (
 	DefaultReleaseURL = "https://github.com/monolythium/mono-core/releases"
-	DefaultVersion    = "v1.1.1"
+	DefaultVersion    = "v1.1.2"
 )
 
 type InstallOptions struct {
