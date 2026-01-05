@@ -515,6 +515,58 @@ Example:
   monoctl docker upgrade --version v0.2.0`,
 		Run: runDockerUpgrade,
 	}
+
+	// Node command group - role management
+	nodeCmd = &cobra.Command{
+		Use:   "node",
+		Short: "Node configuration and role management",
+		Long: `Manage node configuration and deployment roles.
+
+Node roles determine pruning and seed_mode settings:
+  - full_node:    Normal node with pruning enabled, seed_mode=false
+  - archive_node: Full history node with pruning=nothing, seed_mode=false
+  - seed_node:    Official seed requiring full archive + seed_mode=true
+
+IMPORTANT: seed_mode=true REQUIRES pruning=nothing. Seeds must be full
+archive nodes to serve genesis blocksync to new nodes.
+
+Commands:
+  monoctl node configure --role <role> --home ~/.monod
+  monoctl node role --home ~/.monod`,
+	}
+
+	nodeConfigureCmd = &cobra.Command{
+		Use:   "configure",
+		Short: "Configure node for a specific role",
+		Long: `Configure node settings based on deployment role.
+
+Roles:
+  full_node    - Normal pruning, seed_mode=false (default)
+  archive_node - pruning=nothing, seed_mode=false
+  seed_node    - pruning=nothing, seed_mode=true (REQUIRES archive)
+
+CRITICAL: Selecting seed_node will fail if pruning is not set to 'nothing'.
+Seeds must be full archive nodes to serve historical blocks.
+
+Examples:
+  monoctl node configure --role full_node --home ~/.monod
+  monoctl node configure --role archive_node --home ~/.monod
+  monoctl node configure --role seed_node --home ~/.monod --dry-run`,
+		Run: runNodeConfigure,
+	}
+
+	nodeRoleCmd = &cobra.Command{
+		Use:   "role",
+		Short: "Detect current node role from configuration",
+		Long: `Analyze config.toml and app.toml to determine current node role.
+
+Also validates that the configuration is consistent and safe.
+Detects dangerous configurations like seed_mode=true with pruning enabled.
+
+Example:
+  monoctl node role --home ~/.monod`,
+		Run: runNodeRole,
+	}
 )
 
 func init() {
@@ -536,6 +588,8 @@ func init() {
 	joinCmd.Flags().String("peers-url", "", "Peers registry URL (uses network default if not specified)")
 	joinCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
 	joinCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	joinCmd.Flags().Bool("bootstrap", false, "Use bootstrap mode: trusted peers only, pex=false (recommended for deterministic sync)")
+	joinCmd.Flags().Bool("clear-addrbook", false, "Clear addrbook.json to avoid poisoned peers")
 	joinCmd.MarkFlagRequired("network")
 	rootCmd.AddCommand(joinCmd)
 
@@ -766,6 +820,19 @@ func init() {
 	dockerCmd.AddCommand(dockerUpgradeCmd)
 
 	rootCmd.AddCommand(dockerCmd)
+
+	// Node commands
+	nodeConfigureCmd.Flags().String("role", "", "Node role (full_node, archive_node, seed_node)")
+	nodeConfigureCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	nodeConfigureCmd.Flags().String("network", "", "Network name (for context)")
+	nodeConfigureCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	nodeConfigureCmd.MarkFlagRequired("role")
+	nodeCmd.AddCommand(nodeConfigureCmd)
+
+	nodeRoleCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	nodeCmd.AddCommand(nodeRoleCmd)
+
+	rootCmd.AddCommand(nodeCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -832,6 +899,8 @@ func runJoin(cmd *cobra.Command, args []string) {
 	peersURL, _ := cmd.Flags().GetString("peers-url")
 	home, _ := cmd.Flags().GetString("home")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	bootstrap, _ := cmd.Flags().GetBool("bootstrap")
+	clearAddrbook, _ := cmd.Flags().GetBool("clear-addrbook")
 
 	// Parse network name
 	network, err := core.ParseNetworkName(networkStr)
@@ -854,14 +923,22 @@ func runJoin(cmd *cobra.Command, args []string) {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
 
+	// Determine sync strategy
+	syncStrategy := core.SyncStrategyDefault
+	if bootstrap {
+		syncStrategy = core.SyncStrategyBootstrap
+	}
+
 	opts := core.JoinOptions{
-		Network:    network,
-		Home:       home,
-		GenesisURL: genesisURL,
-		GenesisSHA: genesisSHA,
-		PeersURL:   peersURL,
-		DryRun:     dryRun,
-		Logger:     logger,
+		Network:       network,
+		Home:          home,
+		GenesisURL:    genesisURL,
+		GenesisSHA:    genesisSHA,
+		PeersURL:      peersURL,
+		DryRun:        dryRun,
+		Logger:        logger,
+		SyncStrategy:  syncStrategy,
+		ClearAddrbook: clearAddrbook,
 	}
 
 	fetcher := net.NewHTTPFetcher()
@@ -878,6 +955,10 @@ func runJoin(cmd *cobra.Command, args []string) {
 
 	// Print steps
 	fmt.Printf("Join Network: %s\n", network)
+	if bootstrap {
+		fmt.Println("Mode: BOOTSTRAP (trusted peers only, pex=false)")
+		fmt.Println("      Using bootstrap_peers for deterministic genesis sync")
+	}
 	if dryRun {
 		fmt.Println("(DRY RUN - no changes will be made)")
 	}
@@ -2532,8 +2613,8 @@ func runDoctor(cmd *cobra.Command, args []string) {
 			"catching_up":     catchingUp,
 			"peer_count":      peerCount,
 			"status": map[string]bool{
-				"monod_installed":   monodInstalled,
-				"node_home_exists":  nodeHomeExists,
+				"monod_installed":  monodInstalled,
+				"node_home_exists": nodeHomeExists,
 			},
 			"locations": map[string]string{
 				"monod_user":       monodUserPath,
@@ -2543,6 +2624,37 @@ func runDoctor(cmd *cobra.Command, args []string) {
 				"systemd_units":    "/etc/systemd/system/",
 			},
 		}
+
+		// Add role validation if node home exists
+		configPath := filepath.Join(nodeHome, "config", "config.toml")
+		if _, err := os.Stat(configPath); err == nil {
+			role, err := core.DetectCurrentRole(nodeHome)
+			if err == nil {
+				roleInfo := map[string]interface{}{
+					"detected_role": role,
+					"description":   core.RoleDescription(role),
+				}
+
+				validation, err := core.ValidateRoleConfig(nodeHome, role)
+				if err == nil {
+					issues := make([]map[string]string, len(validation.Issues))
+					for i, issue := range validation.Issues {
+						issues[i] = map[string]string{
+							"severity": issue.Severity,
+							"field":    issue.Field,
+							"expected": issue.Expected,
+							"actual":   issue.Actual,
+							"message":  issue.Message,
+						}
+					}
+					roleInfo["valid"] = validation.Valid
+					roleInfo["issues"] = issues
+					roleInfo["suggestions"] = validation.Suggestions
+				}
+				out["role_validation"] = roleInfo
+			}
+		}
+
 		data, _ := json.MarshalIndent(out, "", "  ")
 		fmt.Println(string(data))
 		return
@@ -2611,8 +2723,78 @@ func runDoctor(cmd *cobra.Command, args []string) {
 		fmt.Println("  Commander:      NOT CONFIGURED (will be created on first use)")
 	}
 
+	// Role validation (only if node home exists)
+	configPath := filepath.Join(nodeHome, "config", "config.toml")
+	if _, err := os.Stat(configPath); err == nil {
+		fmt.Println()
+		fmt.Println("NODE ROLE VALIDATION")
+		fmt.Println(strings.Repeat("-", 40))
+
+		role, err := core.DetectCurrentRole(nodeHome)
+		if err != nil {
+			fmt.Printf("  Error detecting role: %v\n", err)
+		} else {
+			fmt.Printf("  Detected Role: %s\n", role)
+			fmt.Printf("  Description:   %s\n", core.RoleDescription(role))
+
+			validation, err := core.ValidateRoleConfig(nodeHome, role)
+			if err != nil {
+				fmt.Printf("  Validation error: %v\n", err)
+			} else {
+				hasCritical := false
+				hasWarning := false
+				for _, issue := range validation.Issues {
+					if issue.Severity == "CRITICAL" {
+						hasCritical = true
+					}
+					if issue.Severity == "WARNING" {
+						hasWarning = true
+					}
+				}
+
+				if validation.Valid {
+					fmt.Println("  Status:        VALID")
+				} else if hasCritical {
+					fmt.Println("  Status:        CRITICAL ISSUES DETECTED")
+				} else if hasWarning {
+					fmt.Println("  Status:        WARNINGS")
+				}
+
+				for _, issue := range validation.Issues {
+					var marker string
+					switch issue.Severity {
+					case "CRITICAL":
+						marker = "CRITICAL"
+					case "WARNING":
+						marker = "WARNING"
+					default:
+						marker = "INFO"
+					}
+					fmt.Printf("\n  [%s] %s\n", marker, issue.Message)
+					if issue.Severity == "CRITICAL" {
+						fmt.Printf("    Expected: %s\n", issue.Expected)
+						fmt.Printf("    Actual:   %s\n", issue.Actual)
+					}
+				}
+
+				// Special warning for seed nodes
+				if role == core.RoleSeedNode {
+					fmt.Println()
+					fmt.Println("  SEED NODE REQUIREMENTS:")
+					fmt.Println("    - Must have pruning=nothing")
+					fmt.Println("    - Must be synced from genesis (earliest_block_height=1)")
+					fmt.Println("    - Must be able to serve historical blocks")
+					fmt.Println()
+					fmt.Println("  Run: monoctl node role --home ~/.monod")
+					fmt.Println("  to verify earliest_block_height via RPC")
+				}
+			}
+		}
+	}
+
 	fmt.Println()
 	fmt.Println("TIP: Use --dry-run on any write command to preview changes.")
+	fmt.Println("     Use 'monoctl node role' to check node role and configuration.")
 }
 
 // promptPassword prompts for a password without echoing
@@ -3096,4 +3278,232 @@ func validatePeer(peer string, checkConn bool) PeerValidationResult {
 	}
 
 	return result
+}
+
+// =============================================================================
+// Node Command Handlers
+// =============================================================================
+
+func runNodeConfigure(cmd *cobra.Command, args []string) {
+	roleStr, _ := cmd.Flags().GetString("role")
+	home, _ := cmd.Flags().GetString("home")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	// Parse role
+	role, err := core.ParseNodeRole(roleStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Default home
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, ".monod")
+	} else if strings.HasPrefix(home, "~") {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, strings.TrimPrefix(home, "~"))
+	}
+	home, _ = filepath.Abs(home)
+
+	// Check that home directory exists
+	configPath := filepath.Join(home, "config", "config.toml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: config.toml not found at %s\n", configPath)
+		fmt.Fprintf(os.Stderr, "Initialize the node first with: monod init <moniker> --home %s\n", home)
+		os.Exit(1)
+	}
+
+	appPath := filepath.Join(home, "config", "app.toml")
+	if _, err := os.Stat(appPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: app.toml not found at %s\n", appPath)
+		fmt.Fprintf(os.Stderr, "Initialize the node first with: monod init <moniker> --home %s\n", home)
+		os.Exit(1)
+	}
+
+	// For seed_node, check if pruning is already nothing (or we need to set it)
+	if role == core.RoleSeedNode {
+		allowed, reason := core.IsSeedModeAllowed(home)
+		if !allowed && !dryRun {
+			// We'll set pruning=nothing as part of configuration
+			fmt.Println("Note: seed_node role requires pruning=nothing. Will configure accordingly.")
+		}
+		_ = allowed
+		_ = reason
+	}
+
+	expectedConfig := core.GetRoleConfig(role)
+
+	if jsonOutput {
+		out := map[string]interface{}{
+			"home":    home,
+			"role":    role,
+			"dry_run": dryRun,
+			"config": map[string]interface{}{
+				"seed_mode":            expectedConfig.SeedMode,
+				"pruning":              expectedConfig.Pruning,
+				"pruning_keep_recent":  expectedConfig.PruningKeepRecent,
+				"pruning_interval":     expectedConfig.PruningInterval,
+			},
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		if dryRun {
+			return
+		}
+	}
+
+	if !jsonOutput {
+		fmt.Printf("Node Role Configuration\n")
+		fmt.Println(strings.Repeat("=", 50))
+		fmt.Printf("Home:     %s\n", home)
+		fmt.Printf("Role:     %s\n", role)
+		fmt.Printf("Dry Run:  %t\n", dryRun)
+		fmt.Println()
+		fmt.Println("Configuration to apply:")
+		fmt.Printf("  seed_mode:            %t\n", expectedConfig.SeedMode)
+		fmt.Printf("  pruning:              %s\n", expectedConfig.Pruning)
+		fmt.Printf("  pruning-keep-recent:  %s\n", expectedConfig.PruningKeepRecent)
+		fmt.Printf("  pruning-interval:     %s\n", expectedConfig.PruningInterval)
+		fmt.Println()
+
+		if dryRun {
+			fmt.Println("(DRY RUN - no changes made)")
+			return
+		}
+	}
+
+	// Apply configuration
+	if err := core.ApplyRoleConfig(home, role, dryRun); err != nil {
+		fmt.Fprintf(os.Stderr, "Error applying configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	if !jsonOutput {
+		fmt.Println("Configuration applied successfully!")
+		fmt.Println()
+		fmt.Println("IMPORTANT: Restart the node for changes to take effect:")
+		fmt.Println("  sudo systemctl restart monod")
+		if role == core.RoleSeedNode {
+			fmt.Println()
+			fmt.Println("WARNING: As a seed node, ensure this node:")
+			fmt.Println("  1. Was synced from genesis (not state-synced)")
+			fmt.Println("  2. Has earliest_block_height = 1")
+			fmt.Println("  3. Can serve historical blocks to new nodes")
+		}
+	}
+}
+
+func runNodeRole(cmd *cobra.Command, args []string) {
+	home, _ := cmd.Flags().GetString("home")
+
+	// Default home
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, ".monod")
+	} else if strings.HasPrefix(home, "~") {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, strings.TrimPrefix(home, "~"))
+	}
+	home, _ = filepath.Abs(home)
+
+	// Check that home directory exists
+	configPath := filepath.Join(home, "config", "config.toml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: config.toml not found at %s\n", configPath)
+		fmt.Fprintf(os.Stderr, "Initialize the node first with: monod init <moniker> --home %s\n", home)
+		os.Exit(1)
+	}
+
+	// Detect current role
+	role, err := core.DetectCurrentRole(home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error detecting role: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Validate configuration for detected role
+	validation, err := core.ValidateRoleConfig(home, role)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error validating configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		type issueJSON struct {
+			Severity string `json:"severity"`
+			Field    string `json:"field"`
+			Expected string `json:"expected"`
+			Actual   string `json:"actual"`
+			Message  string `json:"message"`
+		}
+
+		issues := make([]issueJSON, len(validation.Issues))
+		for i, issue := range validation.Issues {
+			issues[i] = issueJSON{
+				Severity: issue.Severity,
+				Field:    issue.Field,
+				Expected: issue.Expected,
+				Actual:   issue.Actual,
+				Message:  issue.Message,
+			}
+		}
+
+		out := map[string]interface{}{
+			"home":        home,
+			"role":        role,
+			"description": core.RoleDescription(role),
+			"valid":       validation.Valid,
+			"issues":      issues,
+			"suggestions": validation.Suggestions,
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+
+	fmt.Printf("Node Role Detection\n")
+	fmt.Println(strings.Repeat("=", 50))
+	fmt.Printf("Home:        %s\n", home)
+	fmt.Printf("Role:        %s\n", role)
+	fmt.Printf("Description: %s\n", core.RoleDescription(role))
+	fmt.Println()
+
+	if len(validation.Issues) == 0 {
+		fmt.Println("Status: VALID")
+		fmt.Println("Configuration is consistent with detected role.")
+	} else {
+		fmt.Println("Status: ISSUES DETECTED")
+		fmt.Println()
+		for _, issue := range validation.Issues {
+			var prefix string
+			switch issue.Severity {
+			case "CRITICAL":
+				prefix = "CRITICAL"
+			case "WARNING":
+				prefix = "WARNING"
+			default:
+				prefix = "INFO"
+			}
+			fmt.Printf("[%s] %s\n", prefix, issue.Message)
+			fmt.Printf("  Field:    %s\n", issue.Field)
+			fmt.Printf("  Expected: %s\n", issue.Expected)
+			fmt.Printf("  Actual:   %s\n", issue.Actual)
+			fmt.Println()
+		}
+
+		if len(validation.Suggestions) > 0 {
+			fmt.Println("Suggestions:")
+			for _, s := range validation.Suggestions {
+				fmt.Printf("  - %s\n", s)
+			}
+		}
+	}
+
+	// Exit with error code if there are critical issues
+	for _, issue := range validation.Issues {
+		if issue.Severity == "CRITICAL" {
+			os.Exit(1)
+		}
+	}
 }

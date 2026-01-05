@@ -17,20 +17,53 @@ type Peer struct {
 
 // peersRegistryRaw is used for initial JSON parsing with flexible peer formats.
 type peersRegistryRaw struct {
-	ChainID         string            `json:"chain_id"`
-	GenesisSHA      string            `json:"genesis_sha256"`
-	Seeds           []json.RawMessage `json:"seeds"`
-	Peers           []json.RawMessage `json:"peers"`
-	PersistentPeers []json.RawMessage `json:"persistent_peers"`
+	NetworkName          string            `json:"network_name"`
+	ChainID              string            `json:"chain_id"`
+	EVMChainID           uint64            `json:"evm_chain_id"`
+	GenesisSHA           string            `json:"genesis_sha256"`
+	GenesisURL           string            `json:"genesis_url"`
+	Seeds                []json.RawMessage `json:"seeds"`
+	Peers                []json.RawMessage `json:"peers"`
+	PersistentPeers      []json.RawMessage `json:"persistent_peers"`
+	BootstrapPeers       []json.RawMessage `json:"bootstrap_peers"`
+	TrustedRPCEndpoints  []string          `json:"trusted_rpc_endpoints"`
+	PortScheme           *PortScheme       `json:"port_scheme"`
+	RPCEndpoints         *RPCEndpoints     `json:"rpc_endpoints"`
+}
+
+// PortScheme defines the port configuration for different node types.
+type PortScheme struct {
+	Seeds      *PortPair            `json:"seeds"`
+	Validators map[string]*PortPair `json:"validators"`
+}
+
+// PortPair holds P2P and RPC port numbers.
+type PortPair struct {
+	P2P int `json:"p2p"`
+	RPC int `json:"rpc"`
+}
+
+// RPCEndpoints holds public RPC endpoint URLs.
+type RPCEndpoints struct {
+	CometRPC   string `json:"comet_rpc"`
+	CosmosREST string `json:"cosmos_rest"`
+	EVMRPC     string `json:"evm_rpc"`
 }
 
 // PeersRegistry represents a peers.json file.
 type PeersRegistry struct {
-	ChainID         string
-	GenesisSHA      string
-	Seeds           []Peer
-	Peers           []Peer
-	PersistentPeers []Peer
+	NetworkName          string
+	ChainID              string
+	EVMChainID           uint64
+	GenesisSHA           string
+	GenesisURL           string
+	Seeds                []Peer
+	Peers                []Peer
+	PersistentPeers      []Peer
+	BootstrapPeers       []Peer   // Archive nodes for deterministic genesis sync (pex=false)
+	TrustedRPCEndpoints  []string // Trusted RPC endpoints for state sync verification
+	PortScheme           *PortScheme
+	RPCEndpoints         *RPCEndpoints
 }
 
 // nodeIDRegex validates a Tendermint node ID (40 hex chars).
@@ -133,6 +166,11 @@ func ParsePeersRegistry(data []byte) (*PeersRegistry, error) {
 		return nil, err
 	}
 
+	bootstrapPeers, err := parsePeerArray(raw.BootstrapPeers, "bootstrap_peers")
+	if err != nil {
+		return nil, err
+	}
+
 	// Validate all parsed peers
 	for i, p := range seeds {
 		if err := ValidatePeer(p); err != nil {
@@ -152,13 +190,48 @@ func ParsePeersRegistry(data []byte) (*PeersRegistry, error) {
 		}
 	}
 
+	for i, p := range bootstrapPeers {
+		if err := ValidatePeer(p); err != nil {
+			return nil, fmt.Errorf("bootstrap_peers[%d]: %w", i, err)
+		}
+	}
+
 	return &PeersRegistry{
-		ChainID:         raw.ChainID,
-		GenesisSHA:      raw.GenesisSHA,
-		Seeds:           seeds,
-		Peers:           peers,
-		PersistentPeers: persistentPeers,
+		NetworkName:          raw.NetworkName,
+		ChainID:              raw.ChainID,
+		EVMChainID:           raw.EVMChainID,
+		GenesisSHA:           raw.GenesisSHA,
+		GenesisURL:           raw.GenesisURL,
+		Seeds:                seeds,
+		Peers:                peers,
+		PersistentPeers:      persistentPeers,
+		BootstrapPeers:       bootstrapPeers,
+		TrustedRPCEndpoints:  raw.TrustedRPCEndpoints,
+		PortScheme:           raw.PortScheme,
+		RPCEndpoints:         raw.RPCEndpoints,
 	}, nil
+}
+
+// GetSeedP2PPort returns the P2P port for seed nodes, with a default of 26656.
+func (r *PeersRegistry) GetSeedP2PPort() int {
+	if r.PortScheme != nil && r.PortScheme.Seeds != nil && r.PortScheme.Seeds.P2P != 0 {
+		return r.PortScheme.Seeds.P2P
+	}
+	return 26656
+}
+
+// GetValidatorP2PPort returns the P2P port for a named validator, with a default of 26656.
+func (r *PeersRegistry) GetValidatorP2PPort(name string) int {
+	if r.PortScheme != nil && r.PortScheme.Validators != nil {
+		if pp, ok := r.PortScheme.Validators[name]; ok && pp.P2P != 0 {
+			return pp.P2P
+		}
+		// Try "default" fallback
+		if pp, ok := r.PortScheme.Validators["default"]; ok && pp.P2P != 0 {
+			return pp.P2P
+		}
+	}
+	return 26656
 }
 
 // ValidatePeersRegistry validates that the peers registry matches the expected genesis.

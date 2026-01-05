@@ -678,7 +678,8 @@ func (m Model) renderInstall() string {
 		{Number: 1, Title: "System Dependencies", Status: boolToStatus(i.DepsInstalled)},
 		{Number: 2, Title: "Install monod", Status: boolToStatus(i.MonodVersion != "")},
 		{Number: 3, Title: "Join Network", Status: statusFromString(i.JoinStatus)},
-		{Number: 4, Title: "Install Mesh/Rosetta", Status: boolToStatus(i.MeshInstalled)},
+		{Number: 4, Title: "Configure Role", Status: boolToStatus(i.RoleConfigured)},
+		{Number: 5, Title: "Install Mesh/Rosetta", Status: boolToStatus(i.MeshInstalled)},
 	}
 
 	// Calculate widths
@@ -709,7 +710,8 @@ func (m Model) renderInstall() string {
 		KeyHint("1", "deps"),
 		KeyHint("2", "monod"),
 		KeyHint("3", "join"),
-		KeyHint("4", "mesh"),
+		KeyHint("4", "role"),
+		KeyHint("5", "mesh"),
 	)
 	b.WriteString(TextMuted.Render("  " + actions))
 
@@ -725,7 +727,8 @@ func (m Model) renderInstallDetail() string {
 		{"1", "System Dependencies", "Check and install curl, jq, etc."},
 		{"2", "Install monod", "Install the Monolythium node binary"},
 		{"3", "Join Network", "Download genesis, configure peers"},
-		{"4", "Install Mesh/Rosetta", "Install the Rosetta API sidecar"},
+		{"4", "Configure Role", "Set node role (full/archive/seed)"},
+		{"5", "Install Mesh/Rosetta", "Install the Rosetta API sidecar"},
 	}
 
 	var b strings.Builder
@@ -892,6 +895,8 @@ func (m Model) renderForm() string {
 		title = "Install monod"
 	case SubViewInstallJoin:
 		title = "Join Network"
+	case SubViewInstallRole:
+		title = "Configure Node Role"
 	case SubViewInstallMesh:
 		title = "Install Mesh/Rosetta"
 	case SubViewLogsConfig:

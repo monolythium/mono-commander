@@ -7,15 +7,29 @@ import (
 	"log/slog"
 )
 
+// SyncStrategy defines how the node should sync.
+type SyncStrategy string
+
+const (
+	// SyncStrategyDefault uses standard peer discovery (seeds + pex).
+	SyncStrategyDefault SyncStrategy = "default"
+	// SyncStrategyBootstrap uses bootstrap_peers with pex=false for deterministic genesis sync.
+	SyncStrategyBootstrap SyncStrategy = "bootstrap"
+	// SyncStrategyStateSync uses state sync for fast sync (trust but verify).
+	SyncStrategyStateSync SyncStrategy = "statesync"
+)
+
 // JoinOptions contains options for the join operation.
 type JoinOptions struct {
-	Network    NetworkName
-	Home       string
-	GenesisURL string
-	GenesisSHA string
-	PeersURL   string
-	DryRun     bool
-	Logger     *slog.Logger
+	Network      NetworkName
+	Home         string
+	GenesisURL   string
+	GenesisSHA   string
+	PeersURL     string
+	DryRun       bool
+	Logger       *slog.Logger
+	SyncStrategy SyncStrategy // default, bootstrap, statesync
+	ClearAddrbook bool        // Clear addrbook.json on bootstrap mode
 }
 
 // JoinResult contains the results of a join operation.
@@ -103,6 +117,8 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 	var genesisSHA string
 	var seeds []Peer
 	var persistentPeers []Peer
+	var bootstrapPeers []Peer
+	var pexEnabled = true // Default: pex is enabled
 
 	if peersURL != "" {
 		logger.Info("downloading peers", "url", peersURL)
@@ -130,12 +146,39 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 					// Use seeds from registry (all must be node_id@host:port format)
 					seeds = reg.Seeds
 					persistentPeers = MergePeers(reg.Peers, reg.PersistentPeers)
+					bootstrapPeers = reg.BootstrapPeers
 					genesisSHA = reg.GenesisSHA
 					result.Steps[len(result.Steps)-1].Status = "success"
-					result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("%d seeds, %d peers", len(seeds), len(persistentPeers))
+					result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("%d seeds, %d peers, %d bootstrap", len(seeds), len(persistentPeers), len(bootstrapPeers))
 				}
 			}
 		}
+	}
+
+	// Handle bootstrap sync strategy
+	if opts.SyncStrategy == SyncStrategyBootstrap {
+		logger.Info("bootstrap mode: using bootstrap_peers with pex=false")
+		if len(bootstrapPeers) == 0 {
+			// Fall back to persistent_peers if no bootstrap_peers defined
+			if len(persistentPeers) > 0 {
+				logger.Warn("no bootstrap_peers in registry, falling back to persistent_peers")
+				bootstrapPeers = persistentPeers
+			} else {
+				return result, fmt.Errorf("bootstrap mode requires bootstrap_peers in registry (none found)")
+			}
+		}
+		// In bootstrap mode:
+		// - Use bootstrap_peers as persistent_peers
+		// - Clear seeds (don't rely on seed discovery)
+		// - Disable pex
+		persistentPeers = bootstrapPeers
+		seeds = nil // No seeds in bootstrap mode
+		pexEnabled = false
+		result.Steps = append(result.Steps, JoinStep{
+			Name:    "Configure bootstrap mode",
+			Status:  "success",
+			Message: fmt.Sprintf("pex=false, %d bootstrap peers", len(bootstrapPeers)),
+		})
 	}
 
 	// Step 4: Verify SHA256 (use opts.GenesisSHA if provided, otherwise use from peers.json)
@@ -178,11 +221,32 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 		result.Steps[len(result.Steps)-1].Status = "success"
 	}
 
-	// Step 6: Generate config patch
+	// Step 6: Clear addrbook if in bootstrap mode
+	if opts.SyncStrategy == SyncStrategyBootstrap || opts.ClearAddrbook {
+		logger.Info("clearing addrbook.json")
+		result.Steps = append(result.Steps, JoinStep{Name: "Clear addrbook", Status: "pending"})
+		if err := ClearAddrbook(opts.Home, opts.DryRun); err != nil {
+			result.Steps[len(result.Steps)-1].Status = "skipped"
+			result.Steps[len(result.Steps)-1].Message = err.Error()
+		} else {
+			result.Steps[len(result.Steps)-1].Status = "success"
+			if opts.DryRun {
+				result.Steps[len(result.Steps)-1].Message = "(dry-run)"
+			}
+		}
+	}
+
+	// Step 7: Generate config patch
 	logger.Info("generating config patch")
 	result.Steps = append(result.Steps, JoinStep{Name: "Generate config", Status: "pending"})
 
-	patch := GenerateConfigPatch(seeds, persistentPeers)
+	var patch *ConfigPatch
+	if pexEnabled {
+		patch = GenerateConfigPatch(seeds, persistentPeers)
+	} else {
+		patch = GenerateBootstrapConfigPatch(persistentPeers)
+	}
+
 	patchPath, patchContent, err := WriteConfigPatch(opts.Home, patch, opts.DryRun)
 	if err != nil {
 		result.Steps[len(result.Steps)-1].Status = "failed"

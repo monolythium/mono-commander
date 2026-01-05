@@ -84,6 +84,8 @@ const (
 	SubViewInstallDeps
 	SubViewInstallMonod
 	SubViewInstallJoin
+	SubViewInstallSync   // Sync strategy selection
+	SubViewInstallRole
 	SubViewInstallMesh
 	// Tools subviews
 	SubViewToolsWalletGen
@@ -341,12 +343,15 @@ type UpdateInfo struct {
 
 // InstallData holds install wizard state
 type InstallData struct {
-	Step          int
-	DepsInstalled bool
-	MonodPath     string
-	MonodVersion  string
-	JoinStatus    string
-	MeshInstalled bool
+	Step           int
+	DepsInstalled  bool
+	MonodPath      string
+	MonodVersion   string
+	JoinStatus     string
+	SyncStrategy   string // default, bootstrap, statesync
+	SelectedRole   string // full_node, archive_node, seed_node
+	RoleConfigured bool
+	MeshInstalled  bool
 }
 
 // ToolsData holds tools state including wallet generator

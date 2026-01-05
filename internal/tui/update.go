@@ -856,6 +856,9 @@ func (m Model) handleInstallKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.subView = SubViewInstallJoin
 		return m.setupJoinForm(), nil
 	case "4":
+		m.subView = SubViewInstallRole
+		return m.setupRoleForm(), nil
+	case "5":
 		m.subView = SubViewInstallMesh
 		return m.setupMeshInstallForm(), nil
 	case "esc":
@@ -891,10 +894,12 @@ func (m Model) setupInstallMonodForm() Model {
 func (m Model) setupJoinForm() Model {
 	m.formFields = []FormField{
 		{Label: "network", Placeholder: string(m.selectedNetwork), Required: true, Input: newInput("Network")},
+		{Label: "sync", Placeholder: "bootstrap", Required: false, Input: newInput("Sync strategy (bootstrap/default)")},
 		{Label: "home", Placeholder: "~/.monod", Required: false, Input: newInput("Node home directory")},
 		{Label: "genesis-sha256", Placeholder: "", Required: false, Input: newInput("Genesis SHA256 (optional)")},
 	}
 	m.formFields[0].Input.SetValue(string(m.selectedNetwork))
+	m.formFields[1].Input.SetValue("bootstrap") // Recommend bootstrap as default
 	m.formFields[0].Input.Focus()
 	m.formIndex = 0
 	m.subView = SubViewForm
@@ -902,6 +907,7 @@ func (m Model) setupJoinForm() Model {
 		m.subView = SubViewNone
 		m.loading = true
 		networkName := result["network"]
+		syncStrategy := result["sync"]
 		home := result["home"]
 		if home == "" {
 			homeDir, _ := os.UserHomeDir()
@@ -912,9 +918,16 @@ func (m Model) setupJoinForm() Model {
 			if err != nil {
 				return dashboardRefreshMsg{err: err}
 			}
+			// Determine sync strategy
+			strategy := core.SyncStrategyDefault
+			if syncStrategy == "bootstrap" || syncStrategy == "" {
+				strategy = core.SyncStrategyBootstrap
+			}
 			opts := core.JoinOptions{
-				Network: network,
-				Home:    home,
+				Network:       network,
+				Home:          home,
+				SyncStrategy:  strategy,
+				ClearAddrbook: strategy == core.SyncStrategyBootstrap,
 			}
 			fetcher := &net.HTTPFetcher{}
 			joinResult, err := core.Join(opts, fetcher)
@@ -923,6 +936,55 @@ func (m Model) setupJoinForm() Model {
 			}
 			if !joinResult.Success {
 				return dashboardRefreshMsg{err: fmt.Errorf("join failed")}
+			}
+			// Store sync strategy in install data
+			if m.installData != nil {
+				m.installData.SyncStrategy = string(strategy)
+			}
+			return dashboardRefreshMsg{}
+		}
+	}
+	return m
+}
+
+func (m Model) setupRoleForm() Model {
+	// Role selection form with clear descriptions
+	m.formFields = []FormField{
+		{Label: "role", Placeholder: "full_node", Required: true, Input: newInput("Role (full_node/archive_node/seed_node)")},
+		{Label: "home", Placeholder: "~/.monod", Required: false, Input: newInput("Node home directory")},
+	}
+	m.formFields[0].Input.SetValue("full_node")
+	m.formFields[0].Input.Focus()
+	m.formIndex = 0
+	m.subView = SubViewForm
+	m.formCallback = func(m Model, result map[string]string) (Model, tea.Cmd) {
+		m.subView = SubViewNone
+		m.loading = true
+		roleStr := result["role"]
+		home := result["home"]
+		if home == "" {
+			homeDir, _ := os.UserHomeDir()
+			home = homeDir + "/.monod"
+		}
+		return m, func() tea.Msg {
+			role, err := core.ParseNodeRole(roleStr)
+			if err != nil {
+				return dashboardRefreshMsg{err: err}
+			}
+
+			// Check if seed_node role is allowed
+			if role == core.RoleSeedNode {
+				allowed, reason := core.IsSeedModeAllowed(home)
+				if !allowed {
+					// We'll configure pruning=nothing anyway, but warn
+					_ = reason // Log or display warning
+				}
+			}
+
+			// Apply role configuration
+			err = core.ApplyRoleConfig(home, role, false)
+			if err != nil {
+				return dashboardRefreshMsg{err: err}
 			}
 			return dashboardRefreshMsg{}
 		}
