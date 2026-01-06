@@ -9,7 +9,7 @@ services:
     # Environment variables
     environment:
       - MONOLYTHIUM_NETWORK=${MONOLYTHIUM_NETWORK:-Sprintnet}
-      - MONOLYTHIUM_CHAIN_ID=${MONOLYTHIUM_CHAIN_ID:-mono-sprintnet-1}
+      - MONOLYTHIUM_CHAIN_ID=${MONOLYTHIUM_CHAIN_ID:-mono-sprint-1}
 
     # Port mappings (host:container)
     ports:
