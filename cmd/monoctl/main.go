@@ -4164,8 +4164,9 @@ func runMonitorRegister(cmd *cobra.Command, args []string) {
 	apiEndpoint, _ := cmd.Flags().GetString("api")
 
 	if apiEndpoint == "" {
-		apiEndpoint = core.DefaultMonitorAPIEndpoint()
+		apiEndpoint = core.MonitorAPIEndpointForNetwork(networkStr)
 	}
+	fmt.Printf("Using API endpoint: %s\n", apiEndpoint)
 
 	// Get keys directory
 	keysDir, err := core.GetMonitorKeysDir()
@@ -4235,7 +4236,7 @@ func runMonitorHeartbeat(cmd *cobra.Command, args []string) {
 	}
 
 	if apiEndpoint == "" {
-		apiEndpoint = core.DefaultMonitorAPIEndpoint()
+		apiEndpoint = core.MonitorAPIEndpointForNetwork(networkStr)
 	}
 
 	// Get keys directory

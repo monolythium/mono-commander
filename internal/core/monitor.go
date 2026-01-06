@@ -121,11 +121,33 @@ type RegistrationStartResponse struct {
 }
 
 // DefaultMonitorAPIEndpoint returns the default node-monitor API endpoint.
+// Deprecated: Use MonitorAPIEndpointForNetwork instead.
 func DefaultMonitorAPIEndpoint() string {
 	if endpoint := os.Getenv("NODEMON_API"); endpoint != "" {
 		return endpoint
 	}
-	return "https://nodemon.mononodes.xyz"
+	return "https://nodemon.sprintnet.mononodes.xyz"
+}
+
+// MonitorAPIEndpointForNetwork returns the node-monitor API endpoint for a specific network.
+func MonitorAPIEndpointForNetwork(network string) string {
+	// Allow override via environment variable
+	if endpoint := os.Getenv("NODEMON_API"); endpoint != "" {
+		return endpoint
+	}
+
+	// Network-specific endpoints
+	switch strings.ToLower(network) {
+	case "sprintnet":
+		return "https://nodemon.sprintnet.mononodes.xyz"
+	case "testnet":
+		return "https://nodemon.testnet.mononodes.xyz"
+	case "mainnet":
+		return "https://nodemon.mainnet.mononodes.xyz"
+	default:
+		// For localnet or unknown networks, use sprintnet as fallback
+		return "https://nodemon.sprintnet.mononodes.xyz"
+	}
 }
 
 // GetMonitorKeysDir returns the directory for monitor keys.
