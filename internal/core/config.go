@@ -293,6 +293,65 @@ func SetClientChainID(home string, chainID string, dryRun bool) error {
 	return nil
 }
 
+// SetEVMChainID sets the evm-chain-id in app.toml.
+// This is CRITICAL for EVM transaction processing - without the correct evm-chain-id,
+// nodes will compute different state for EVM transactions, causing AppHash mismatches.
+func SetEVMChainID(home string, evmChainID uint64, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+
+	appPath := filepath.Join(home, "config", "app.toml")
+
+	// Check if file exists
+	if _, err := os.Stat(appPath); os.IsNotExist(err) {
+		return fmt.Errorf("app.toml not found at %s - run 'monod init' first", appPath)
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(appPath)
+	if err != nil {
+		return fmt.Errorf("failed to read app.toml: %w", err)
+	}
+
+	// Use line-by-line parsing to preserve comments and formatting
+	lines := strings.Split(string(data), "\n")
+	var result []string
+	inEVMSection := false
+	evmChainIDReplaced := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Track which section we're in
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inEVMSection = trimmed == "[evm]"
+		}
+
+		// Replace evm-chain-id in [evm] section only
+		if inEVMSection && isConfigKey(trimmed, "evm-chain-id") {
+			leadingWS := getLeadingWhitespace(line)
+			result = append(result, fmt.Sprintf("%sevm-chain-id = %d", leadingWS, evmChainID))
+			evmChainIDReplaced = true
+			continue
+		}
+
+		result = append(result, line)
+	}
+
+	if !evmChainIDReplaced {
+		return fmt.Errorf("could not find 'evm-chain-id' key in [evm] section of app.toml")
+	}
+
+	// Write back
+	output := strings.Join(result, "\n")
+	if err := os.WriteFile(appPath, []byte(output), 0644); err != nil {
+		return fmt.Errorf("failed to write app.toml: %w", err)
+	}
+
+	return nil
+}
+
 // ClearAddrbook removes the addrbook.json file to ensure fresh peer discovery.
 // This is useful when switching sync strategies to avoid poisoned peers.
 func ClearAddrbook(home string, dryRun bool) error {

@@ -543,6 +543,28 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 		result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("chain-id = %q", chainID)
 	}
 
+	// Step 11: Set evm-chain-id in app.toml (CRITICAL for EVM determinism)
+	// Without the correct evm-chain-id, nodes compute different state for EVM transactions,
+	// causing AppHash mismatches and consensus failures.
+	if network.EVMChainID != 0 {
+		logger.Info("setting evm-chain-id in app.toml", "evm_chain_id", network.EVMChainID)
+		result.Steps = append(result.Steps, JoinStep{Name: "Set EVM chain-id", Status: "pending"})
+
+		if err := SetEVMChainID(opts.Home, network.EVMChainID, opts.DryRun); err != nil {
+			result.Steps[len(result.Steps)-1].Status = "failed"
+			result.Steps[len(result.Steps)-1].Message = err.Error()
+			return result, fmt.Errorf("failed to set evm-chain-id in app.toml: %w", err)
+		}
+
+		if opts.DryRun {
+			result.Steps[len(result.Steps)-1].Status = "success"
+			result.Steps[len(result.Steps)-1].Message = "(dry-run)"
+		} else {
+			result.Steps[len(result.Steps)-1].Status = "success"
+			result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("evm-chain-id = %d", network.EVMChainID)
+		}
+	}
+
 	result.Success = true
 	return result, nil
 }
