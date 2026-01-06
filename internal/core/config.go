@@ -53,6 +53,7 @@ func GenerateBootstrapConfigPatch(bootstrapPeers []Peer) *ConfigPatch {
 }
 
 // WriteConfigPatch writes a config patch reference file (for documentation/review).
+// Note: monoctl join now applies config directly; this function is kept for reference.
 func WriteConfigPatch(home string, patch *ConfigPatch, dryRun bool) (string, string, error) {
 	configDir := filepath.Join(home, "config")
 	patchPath := filepath.Join(configDir, "config_patch.toml")
@@ -63,13 +64,12 @@ func WriteConfigPatch(home string, patch *ConfigPatch, dryRun bool) (string, str
 	}
 
 	content := fmt.Sprintf(`# Mono Commander Config Patch
-# These values should be applied to config.toml [p2p] section
-# Run: monoctl config apply --home %s
+# These values have been applied to config.toml [p2p] section
 
 [p2p]
 seeds = "%s"
 persistent_peers = "%s"
-%s`, home, patch.Seeds, patch.PersistentPeers, pexLine)
+%s`, patch.Seeds, patch.PersistentPeers, pexLine)
 
 	if dryRun {
 		return patchPath, content, nil
@@ -236,6 +236,61 @@ func GetConfigValue(configPath, section, key string) (string, error) {
 	}
 
 	return fmt.Sprintf("%v", value), nil
+}
+
+// SetClientChainID sets the chain-id in client.toml.
+// This is REQUIRED for monod start to work - without it, InitChain fails with
+// "invalid chain-id on InitChain; expected: , got: <actual-chain-id>".
+// The chain-id in client.toml is what monod uses to validate the genesis chain-id
+// during the ABCI handshake.
+func SetClientChainID(home string, chainID string, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+
+	clientPath := filepath.Join(home, "config", "client.toml")
+
+	// Check if file exists
+	if _, err := os.Stat(clientPath); os.IsNotExist(err) {
+		return fmt.Errorf("client.toml not found at %s - run 'monod init' first", clientPath)
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(clientPath)
+	if err != nil {
+		return fmt.Errorf("failed to read client.toml: %w", err)
+	}
+
+	// Use line-by-line parsing to preserve comments and formatting
+	lines := strings.Split(string(data), "\n")
+	var result []string
+	chainIDReplaced := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Replace chain-id line
+		if isConfigKey(trimmed, "chain-id") {
+			leadingWS := getLeadingWhitespace(line)
+			result = append(result, fmt.Sprintf(`%schain-id = "%s"`, leadingWS, chainID))
+			chainIDReplaced = true
+			continue
+		}
+
+		result = append(result, line)
+	}
+
+	if !chainIDReplaced {
+		return fmt.Errorf("could not find 'chain-id' key in client.toml")
+	}
+
+	// Write back
+	output := strings.Join(result, "\n")
+	if err := os.WriteFile(clientPath, []byte(output), 0644); err != nil {
+		return fmt.Errorf("failed to write client.toml: %w", err)
+	}
+
+	return nil
 }
 
 // ClearAddrbook removes the addrbook.json file to ensure fresh peer discovery.

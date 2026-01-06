@@ -196,3 +196,138 @@ seeds = ""
 		})
 	}
 }
+
+// TestSetClientChainID verifies setting chain-id in client.toml
+// This is critical for monod start to work
+func TestSetClientChainID(t *testing.T) {
+	tests := []struct {
+		name           string
+		initialContent string
+		chainID        string
+		expectChainID  string
+		expectErr      bool
+	}{
+		{
+			name: "empty chain-id",
+			initialContent: `chain-id = ""
+keyring-backend = "os"
+`,
+			chainID:       "mono-sprint-1",
+			expectChainID: `chain-id = "mono-sprint-1"`,
+			expectErr:     false,
+		},
+		{
+			name: "wrong chain-id",
+			initialContent: `chain-id = "wrong-chain"
+keyring-backend = "os"
+`,
+			chainID:       "mono-sprint-1",
+			expectChainID: `chain-id = "mono-sprint-1"`,
+			expectErr:     false,
+		},
+		{
+			name: "preserves other fields",
+			initialContent: `# Client config
+chain-id = ""
+keyring-backend = "os"
+output = "text"
+node = "tcp://localhost:26657"
+broadcast-mode = "sync"
+`,
+			chainID:       "mono-sprint-1",
+			expectChainID: `chain-id = "mono-sprint-1"`,
+			expectErr:     false,
+		},
+		{
+			name: "preserves whitespace",
+			initialContent: `  chain-id = ""
+  keyring-backend = "os"
+`,
+			chainID:       "mono-sprint-1",
+			expectChainID: `chain-id = "mono-sprint-1"`,
+			expectErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configDir := filepath.Join(tmpDir, "config")
+			if err := os.MkdirAll(configDir, 0755); err != nil {
+				t.Fatalf("failed to create config dir: %v", err)
+			}
+
+			clientPath := filepath.Join(configDir, "client.toml")
+			if err := os.WriteFile(clientPath, []byte(tt.initialContent), 0644); err != nil {
+				t.Fatalf("failed to write client.toml: %v", err)
+			}
+
+			err := SetClientChainID(tmpDir, tt.chainID, false)
+			if tt.expectErr && err == nil {
+				t.Errorf("expected error but got none")
+			}
+			if !tt.expectErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			if !tt.expectErr {
+				result, err := os.ReadFile(clientPath)
+				if err != nil {
+					t.Fatalf("failed to read result: %v", err)
+				}
+				if !strings.Contains(string(result), tt.expectChainID) {
+					t.Errorf("expected %q in result, got:\n%s", tt.expectChainID, string(result))
+				}
+				// Verify keyring-backend is preserved
+				if !strings.Contains(string(result), "keyring-backend") {
+					t.Errorf("keyring-backend was lost")
+				}
+			}
+		})
+	}
+}
+
+// TestSetClientChainID_MissingFile verifies error when client.toml doesn't exist
+func TestSetClientChainID_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := SetClientChainID(tmpDir, "mono-sprint-1", false)
+	if err == nil {
+		t.Error("expected error for missing client.toml")
+	}
+	if err != nil && !strings.Contains(err.Error(), "client.toml not found") {
+		t.Errorf("expected 'client.toml not found' error, got: %v", err)
+	}
+}
+
+// TestSetClientChainID_DryRun verifies dry run doesn't modify files
+func TestSetClientChainID_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	initialContent := `chain-id = ""
+keyring-backend = "os"
+`
+	clientPath := filepath.Join(configDir, "client.toml")
+	if err := os.WriteFile(clientPath, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("failed to write client.toml: %v", err)
+	}
+
+	// Dry run should not error and should not modify file
+	err := SetClientChainID(tmpDir, "mono-sprint-1", true)
+	if err != nil {
+		t.Errorf("dry run should not error: %v", err)
+	}
+
+	// Verify file was not modified
+	result, err := os.ReadFile(clientPath)
+	if err != nil {
+		t.Fatalf("failed to read result: %v", err)
+	}
+	if string(result) != initialContent {
+		t.Errorf("dry run modified file, expected:\n%s\ngot:\n%s", initialContent, string(result))
+	}
+}
