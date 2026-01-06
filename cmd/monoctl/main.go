@@ -659,6 +659,99 @@ Examples:
   monoctl config repair --network Sprintnet --home ~/.monod`,
 		Run: runConfigRepair,
 	}
+
+	// Monitor command group - opt-in node monitoring
+	monitorCmd = &cobra.Command{
+		Use:   "monitor",
+		Short: "Opt-in node monitoring (privacy-preserving)",
+		Long: `Opt-in node monitoring for Monolythium nodes.
+
+This command group allows operators to register their nodes for monitoring
+and send periodic heartbeats. All monitoring is opt-in and privacy-preserving:
+  - No IPs, hostnames, or RPC URLs are exposed publicly
+  - Only node_id-based identity is shown
+  - Operators control what is visible
+
+Commands:
+  monoctl monitor register   # Register node for monitoring
+  monoctl monitor heartbeat  # Send a single heartbeat
+  monoctl monitor install    # Install systemd timer for automatic heartbeats
+  monoctl monitor uninstall  # Remove systemd timer`,
+	}
+
+	monitorRegisterCmd = &cobra.Command{
+		Use:   "register",
+		Short: "Register node for monitoring",
+		Long: `Register your node for opt-in monitoring.
+
+This command:
+1. Generates an ed25519 keypair for signing heartbeats
+2. Retrieves your node_id from the local node
+3. Sends registration request to node-monitor API
+4. Returns a link token to complete registration via Telegram bot
+
+The link token expires in 15 minutes. Send it to the Monolythium Telegram
+bot to complete registration and link your node to your account.
+
+Examples:
+  monoctl monitor register --network Sprintnet --moniker "my-node" --role validator
+  monoctl monitor register --network Sprintnet --moniker "my-node" --role fullnode`,
+		Run: runMonitorRegister,
+	}
+
+	monitorHeartbeatCmd = &cobra.Command{
+		Use:   "heartbeat",
+		Short: "Send a single heartbeat",
+		Long: `Send a single heartbeat to the node-monitor API.
+
+This command collects local node status and capabilities, signs the payload
+with your monitor keypair, and sends it to the API. This is typically
+run automatically by a systemd timer every 30 seconds.
+
+The heartbeat includes:
+  - Node height, catching_up status, earliest_block_height
+  - monod and monoctl versions
+  - chain-id and evm-chain-id
+  - Detected capabilities (pruning, state-sync, snapshots, services)
+
+NO IPs, hostnames, or RPC URLs are sent.
+
+Examples:
+  monoctl monitor heartbeat --network Sprintnet --home ~/.monod`,
+		Run: runMonitorHeartbeat,
+	}
+
+	monitorInstallCmd = &cobra.Command{
+		Use:   "install",
+		Short: "Install systemd timer for automatic heartbeats",
+		Long: `Install a systemd timer to send heartbeats every 30 seconds.
+
+This creates two systemd unit files:
+  - monoctl-monitor@<network>.service (oneshot service)
+  - monoctl-monitor@<network>.timer (30s interval timer)
+
+Requires sudo access to install to /etc/systemd/system/.
+
+Examples:
+  sudo monoctl monitor install --network Sprintnet --user monouser --home /home/monouser/.monod`,
+		Run: runMonitorInstall,
+	}
+
+	monitorUninstallCmd = &cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove systemd timer for heartbeats",
+		Long: `Remove the systemd timer and service for automatic heartbeats.
+
+This stops and removes:
+  - monoctl-monitor@<network>.timer
+  - monoctl-monitor@<network>.service
+
+Requires sudo access.
+
+Examples:
+  sudo monoctl monitor uninstall --network Sprintnet`,
+		Run: runMonitorUninstall,
+	}
 )
 
 func init() {
@@ -948,6 +1041,36 @@ func init() {
 	configCmd.AddCommand(configRepairCmd)
 
 	rootCmd.AddCommand(configCmd)
+
+	// Monitor commands - opt-in node monitoring
+	monitorRegisterCmd.Flags().String("network", "", "Network name (Sprintnet, Testnet, Mainnet)")
+	monitorRegisterCmd.Flags().String("moniker", "", "Node moniker/name")
+	monitorRegisterCmd.Flags().String("role", "fullnode", "Node role (validator, seed, bootstrap, fullnode, gateway, snapshot)")
+	monitorRegisterCmd.Flags().String("api", "", "Node-monitor API endpoint (default: https://nodemon.mononodes.xyz)")
+	monitorRegisterCmd.MarkFlagRequired("network")
+	monitorRegisterCmd.MarkFlagRequired("moniker")
+	monitorCmd.AddCommand(monitorRegisterCmd)
+
+	monitorHeartbeatCmd.Flags().String("network", "", "Network name (Sprintnet, Testnet, Mainnet)")
+	monitorHeartbeatCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	monitorHeartbeatCmd.Flags().String("api", "", "Node-monitor API endpoint (default: https://nodemon.mononodes.xyz)")
+	monitorHeartbeatCmd.MarkFlagRequired("network")
+	monitorCmd.AddCommand(monitorHeartbeatCmd)
+
+	monitorInstallCmd.Flags().String("network", "", "Network name (Sprintnet, Testnet, Mainnet)")
+	monitorInstallCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	monitorInstallCmd.Flags().String("user", "", "System user to run as")
+	monitorInstallCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	monitorInstallCmd.MarkFlagRequired("network")
+	monitorInstallCmd.MarkFlagRequired("user")
+	monitorCmd.AddCommand(monitorInstallCmd)
+
+	monitorUninstallCmd.Flags().String("network", "", "Network name (Sprintnet, Testnet, Mainnet)")
+	monitorUninstallCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	monitorUninstallCmd.MarkFlagRequired("network")
+	monitorCmd.AddCommand(monitorUninstallCmd)
+
+	rootCmd.AddCommand(monitorCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -4028,4 +4151,253 @@ func runConfigRepair(cmd *cobra.Command, args []string) {
 		fmt.Printf("Run: monoctl config doctor --network %s --home %s\n", networkStr, home)
 		fmt.Println("to verify the repair was successful.")
 	}
+}
+
+// =============================================================================
+// Monitor Commands - Opt-in Node Monitoring
+// =============================================================================
+
+func runMonitorRegister(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	moniker, _ := cmd.Flags().GetString("moniker")
+	role, _ := cmd.Flags().GetString("role")
+	apiEndpoint, _ := cmd.Flags().GetString("api")
+
+	if apiEndpoint == "" {
+		apiEndpoint = core.DefaultMonitorAPIEndpoint()
+	}
+
+	// Get keys directory
+	keysDir, err := core.GetMonitorKeysDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load or create keys
+	fmt.Println("Loading or creating monitor keypair...")
+	keys, err := core.LoadOrCreateKeys(keysDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading/creating keys: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Node ID: %s\n", keys.NodeID)
+
+	// Start registration
+	fmt.Println("Registering with node-monitor API...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	resp, err := core.StartRegistration(ctx, apiEndpoint, keys, networkStr, moniker, role)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(map[string]interface{}{
+			"node_id":    keys.NodeID,
+			"network":    networkStr,
+			"moniker":    moniker,
+			"role":       role,
+			"link_token": resp.LinkToken,
+			"expires_at": resp.ExpiresAt,
+		})
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("Registration started successfully!")
+	fmt.Println()
+	fmt.Printf("Link Token: %s\n", resp.LinkToken)
+	fmt.Printf("Expires At: %s\n", resp.ExpiresAt.Format(time.RFC3339))
+	fmt.Println()
+	fmt.Println("To complete registration, send this token to the Monolythium Telegram bot.")
+	fmt.Println("The token expires in 15 minutes.")
+}
+
+func runMonitorHeartbeat(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	apiEndpoint, _ := cmd.Flags().GetString("api")
+
+	// Default home directory
+	if home == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: could not determine home directory: %v\n", err)
+			os.Exit(1)
+		}
+		home = filepath.Join(homeDir, ".monod")
+	}
+
+	if apiEndpoint == "" {
+		apiEndpoint = core.DefaultMonitorAPIEndpoint()
+	}
+
+	// Get keys directory
+	keysDir, err := core.GetMonitorKeysDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load keys
+	keys, err := core.LoadKeys(keysDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading keys: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Have you registered? Run: monoctl monitor register --network %s --moniker <name>\n", networkStr)
+		os.Exit(1)
+	}
+
+	// Get local status
+	status, err := core.GetLocalStatus(home, tui.Version)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting node status: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get capabilities
+	caps, err := core.GetLocalCapabilities(home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not get full capabilities: %v\n", err)
+		caps = &core.MonitorCapabilities{}
+	}
+
+	// Sign heartbeat
+	payload, err := core.SignHeartbeat(keys, networkStr, status, caps)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error signing heartbeat: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Send heartbeat
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	resp, err := core.SendHeartbeat(ctx, apiEndpoint, payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending heartbeat: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(resp)
+		return
+	}
+
+	fmt.Printf("Heartbeat sent successfully!\n")
+	fmt.Printf("  Health: %s\n", resp.Health)
+	fmt.Printf("  Height: %d (canonical: %d, lag: %d)\n", status.Height, resp.CanonicalHeight, resp.LagBlocks)
+}
+
+func runMonitorInstall(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	user, _ := cmd.Flags().GetString("user")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	// Default home directory
+	if home == "" {
+		fmt.Fprintf(os.Stderr, "Error: --home is required for systemd install\n")
+		os.Exit(1)
+	}
+
+	networkLower := strings.ToLower(networkStr)
+	serviceFile := fmt.Sprintf("/etc/systemd/system/monoctl-monitor@.service")
+	timerFile := fmt.Sprintf("/etc/systemd/system/monoctl-monitor@.timer")
+
+	service, timer := core.GenerateSystemdTimer(networkStr, home, user)
+
+	if dryRun {
+		fmt.Println("Would create the following files:")
+		fmt.Println()
+		fmt.Printf("=== %s ===\n", serviceFile)
+		fmt.Println(service)
+		fmt.Printf("=== %s ===\n", timerFile)
+		fmt.Println(timer)
+		fmt.Println()
+		fmt.Printf("Would enable and start: monoctl-monitor@%s.timer\n", networkLower)
+		return
+	}
+
+	// Check if running as root
+	if os.Geteuid() != 0 {
+		fmt.Fprintf(os.Stderr, "Error: systemd install requires root privileges\n")
+		fmt.Fprintf(os.Stderr, "Run: sudo monoctl monitor install --network %s --user %s --home %s\n", networkStr, user, home)
+		os.Exit(1)
+	}
+
+	// Write service file
+	if err := os.WriteFile(serviceFile, []byte(service), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing service file: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Created %s\n", serviceFile)
+
+	// Write timer file
+	if err := os.WriteFile(timerFile, []byte(timer), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing timer file: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Created %s\n", timerFile)
+
+	// Reload systemd
+	exec.Command("systemctl", "daemon-reload").Run()
+
+	// Enable and start timer
+	timerName := fmt.Sprintf("monoctl-monitor@%s.timer", networkLower)
+	if err := exec.Command("systemctl", "enable", timerName).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to enable timer: %v\n", err)
+	}
+	if err := exec.Command("systemctl", "start", timerName).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to start timer: %v\n", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("Monitor timer installed and started: %s\n", timerName)
+	fmt.Println("Heartbeats will be sent every 30 seconds.")
+}
+
+func runMonitorUninstall(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	networkLower := strings.ToLower(networkStr)
+	timerName := fmt.Sprintf("monoctl-monitor@%s.timer", networkLower)
+	serviceName := fmt.Sprintf("monoctl-monitor@%s.service", networkLower)
+
+	if dryRun {
+		fmt.Printf("Would stop and disable: %s\n", timerName)
+		fmt.Println("Would remove:")
+		fmt.Println("  /etc/systemd/system/monoctl-monitor@.service")
+		fmt.Println("  /etc/systemd/system/monoctl-monitor@.timer")
+		return
+	}
+
+	// Check if running as root
+	if os.Geteuid() != 0 {
+		fmt.Fprintf(os.Stderr, "Error: systemd uninstall requires root privileges\n")
+		fmt.Fprintf(os.Stderr, "Run: sudo monoctl monitor uninstall --network %s\n", networkStr)
+		os.Exit(1)
+	}
+
+	// Stop and disable
+	exec.Command("systemctl", "stop", timerName).Run()
+	exec.Command("systemctl", "stop", serviceName).Run()
+	exec.Command("systemctl", "disable", timerName).Run()
+
+	// Remove files
+	os.Remove("/etc/systemd/system/monoctl-monitor@.service")
+	os.Remove("/etc/systemd/system/monoctl-monitor@.timer")
+
+	// Reload systemd
+	exec.Command("systemctl", "daemon-reload").Run()
+
+	fmt.Println("Monitor timer uninstalled.")
 }
