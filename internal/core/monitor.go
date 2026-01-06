@@ -584,6 +584,80 @@ func StartRegistration(ctx context.Context, apiEndpoint string, keys *MonitorKey
 	return &result, nil
 }
 
+// VisibilityResponse is the response from setting visibility.
+type VisibilityResponse struct {
+	Success    bool   `json:"success"`
+	NodeID     string `json:"node_id"`
+	Visibility string `json:"visibility"`
+}
+
+// SetVisibility changes the public visibility of a node.
+func SetVisibility(ctx context.Context, apiEndpoint string, keys *MonitorKeys, network, visibility string) (*VisibilityResponse, error) {
+	timestamp := time.Now().Unix()
+
+	// Generate nonce
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+	nonce := hex.EncodeToString(nonceBytes)
+
+	// Create message to sign (same format as heartbeat)
+	message := fmt.Sprintf("%s|%s|%d|%s", keys.NodeID, network, timestamp, nonce)
+	signature := ed25519.Sign(keys.PrivateKey, []byte(message))
+	signatureB64 := base64.StdEncoding.EncodeToString(signature)
+
+	req := struct {
+		NodeID        string `json:"node_id"`
+		Network       string `json:"network"`
+		Visibility    string `json:"visibility"`
+		TimestampUnix int64  `json:"timestamp_unix"`
+		Nonce         string `json:"nonce"`
+		Signature     string `json:"signature"`
+	}{
+		NodeID:        keys.NodeID,
+		Network:       network,
+		Visibility:    visibility,
+		TimestampUnix: timestamp,
+		Nonce:         nonce,
+		Signature:     signatureB64,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiEndpoint+"/v1/visibility", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("visibility change failed: %s (HTTP %d)", string(body), resp.StatusCode)
+	}
+
+	var result VisibilityResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // GenerateSystemdTimer generates a systemd timer unit for heartbeats.
 func GenerateSystemdTimer(network, home, user string) (service, timer string) {
 	// Using template-based service (the @.service pattern)

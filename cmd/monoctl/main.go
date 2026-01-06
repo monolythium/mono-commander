@@ -676,7 +676,8 @@ Commands:
   monoctl monitor register   # Register node for monitoring
   monoctl monitor heartbeat  # Send a single heartbeat
   monoctl monitor install    # Install systemd timer for automatic heartbeats
-  monoctl monitor uninstall  # Remove systemd timer`,
+  monoctl monitor uninstall  # Remove systemd timer
+  monoctl monitor visibility # Set public/private visibility`,
 	}
 
 	monitorRegisterCmd = &cobra.Command{
@@ -751,6 +752,22 @@ Requires sudo access.
 Examples:
   sudo monoctl monitor uninstall --network Sprintnet`,
 		Run: runMonitorUninstall,
+	}
+
+	monitorVisibilityCmd = &cobra.Command{
+		Use:   "visibility",
+		Short: "Set node visibility (public/private)",
+		Long: `Change whether your node is publicly visible on the explorer.
+
+By default, registered nodes are private and do not appear in the public
+node list on the explorer. Use --public to make your node visible.
+
+This requires a valid registration (keypair must exist).
+
+Examples:
+  monoctl monitor visibility --public --network Sprintnet --home ~/.monod
+  monoctl monitor visibility --private --network Sprintnet`,
+		Run: runMonitorVisibility,
 	}
 )
 
@@ -1070,6 +1087,14 @@ func init() {
 	monitorUninstallCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
 	monitorUninstallCmd.MarkFlagRequired("network")
 	monitorCmd.AddCommand(monitorUninstallCmd)
+
+	monitorVisibilityCmd.Flags().String("network", "", "Network name (Sprintnet, Testnet, Mainnet)")
+	monitorVisibilityCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	monitorVisibilityCmd.Flags().String("api", "", "Node-monitor API endpoint (default: https://nodemon.mononodes.xyz)")
+	monitorVisibilityCmd.Flags().Bool("public", false, "Make node publicly visible on explorer")
+	monitorVisibilityCmd.Flags().Bool("private", false, "Make node private (not visible on explorer)")
+	monitorVisibilityCmd.MarkFlagRequired("network")
+	monitorCmd.AddCommand(monitorVisibilityCmd)
 
 	rootCmd.AddCommand(monitorCmd)
 }
@@ -4297,6 +4322,84 @@ func runMonitorHeartbeat(cmd *cobra.Command, args []string) {
 	fmt.Printf("Heartbeat sent successfully!\n")
 	fmt.Printf("  Health: %s\n", resp.Health)
 	fmt.Printf("  Height: %d (canonical: %d, lag: %d)\n", status.Height, resp.CanonicalHeight, resp.LagBlocks)
+}
+
+func runMonitorVisibility(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	apiEndpoint, _ := cmd.Flags().GetString("api")
+	makePublic, _ := cmd.Flags().GetBool("public")
+	makePrivate, _ := cmd.Flags().GetBool("private")
+
+	// Validate flags
+	if !makePublic && !makePrivate {
+		fmt.Fprintf(os.Stderr, "Error: must specify --public or --private\n")
+		os.Exit(1)
+	}
+	if makePublic && makePrivate {
+		fmt.Fprintf(os.Stderr, "Error: cannot specify both --public and --private\n")
+		os.Exit(1)
+	}
+
+	visibility := "private"
+	if makePublic {
+		visibility = "public"
+	}
+
+	// Default home directory
+	if home == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: could not determine home directory: %v\n", err)
+			os.Exit(1)
+		}
+		home = filepath.Join(homeDir, ".monod")
+	}
+
+	if apiEndpoint == "" {
+		apiEndpoint = core.MonitorAPIEndpointForNetwork(networkStr)
+	}
+
+	// Get keys directory
+	keysDir, err := core.GetMonitorKeysDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load keys
+	keys, err := core.LoadKeys(keysDir, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading keys: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Have you registered? Run: monoctl monitor register --network %s --moniker <name>\n", networkStr)
+		os.Exit(1)
+	}
+
+	// Set visibility
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	resp, err := core.SetVisibility(ctx, apiEndpoint, keys, networkStr, visibility)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error setting visibility: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(resp)
+		return
+	}
+
+	fmt.Printf("Visibility updated successfully!\n")
+	fmt.Printf("  Node ID: %s\n", resp.NodeID)
+	fmt.Printf("  Visibility: %s\n", resp.Visibility)
+	if visibility == "public" {
+		fmt.Printf("\nYour node will now appear on the public explorer.\n")
+	} else {
+		fmt.Printf("\nYour node will no longer appear on the public explorer.\n")
+	}
 }
 
 func runMonitorInstall(cmd *cobra.Command, args []string) {
