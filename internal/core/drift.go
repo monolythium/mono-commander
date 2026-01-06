@@ -28,9 +28,9 @@ type DriftResult struct {
 // DriftConfig holds the expected configuration for drift detection.
 // This combines Network settings with peers registry data.
 type DriftConfig struct {
-	CosmosChainID string
-	EVMChainID    uint64
-	Seeds         []string // In node_id@host:port format
+	CosmosChainID  string
+	EVMChainID     uint64
+	Seeds          []string // In node_id@host:port format
 	BootstrapPeers []string // In node_id@host:port format
 }
 

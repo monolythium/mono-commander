@@ -43,9 +43,9 @@ pex = true
 	// Test dry run
 	t.Run("dry run", func(t *testing.T) {
 		config := &DriftConfig{
-			CosmosChainID: "new-chain-1",
-			EVMChainID:    262145,
-			Seeds:         []string{},
+			CosmosChainID:  "new-chain-1",
+			EVMChainID:     262145,
+			Seeds:          []string{},
 			BootstrapPeers: []string{},
 		}
 
@@ -68,9 +68,9 @@ pex = true
 	// Test actual repair
 	t.Run("actual repair", func(t *testing.T) {
 		config := &DriftConfig{
-			CosmosChainID: "new-chain-1",
-			EVMChainID:    262145,
-			Seeds:         []string{},
+			CosmosChainID:  "new-chain-1",
+			EVMChainID:     262145,
+			Seeds:          []string{},
 			BootstrapPeers: []string{},
 		}
 

@@ -39,14 +39,14 @@ type MonitorKeys struct {
 
 // MonitorStatus holds the local node status for heartbeats.
 type MonitorStatus struct {
-	Height             int64
-	CatchingUp         bool
+	Height              int64
+	CatchingUp          bool
 	EarliestBlockHeight int64
-	VersionMonod       string
-	VersionMonoctl     string
-	ChainID            string
-	EVMChainID         uint64
-	PeerCount          int
+	VersionMonod        string
+	VersionMonoctl      string
+	ChainID             string
+	EVMChainID          uint64
+	PeerCount           int
 }
 
 // MonitorCapabilities holds local node capabilities.
@@ -88,14 +88,14 @@ type HeartbeatPayload struct {
 
 // HeartbeatStatus is the status portion of the heartbeat.
 type HeartbeatStatus struct {
-	Height             int64  `json:"height"`
-	CatchingUp         bool   `json:"catching_up"`
-	EarliestBlockHeight int64 `json:"earliest_block_height"`
-	VersionMonod       string `json:"version_monod"`
-	VersionMonoctl     string `json:"version_monoctl"`
-	ChainID            string `json:"chain_id"`
-	EVMChainID         uint64 `json:"evm_chain_id"`
-	PeerCount          int    `json:"peer_count,omitempty"`
+	Height              int64  `json:"height"`
+	CatchingUp          bool   `json:"catching_up"`
+	EarliestBlockHeight int64  `json:"earliest_block_height"`
+	VersionMonod        string `json:"version_monod"`
+	VersionMonoctl      string `json:"version_monoctl"`
+	ChainID             string `json:"chain_id"`
+	EVMChainID          uint64 `json:"evm_chain_id"`
+	PeerCount           int    `json:"peer_count,omitempty"`
 }
 
 // HeartbeatResponse is the response from the node-monitor API.
@@ -489,14 +489,14 @@ func SignHeartbeat(keys *MonitorKeys, network string, status *MonitorStatus, cap
 		Nonce:         nonce,
 		Signature:     signatureB64,
 		Status: HeartbeatStatus{
-			Height:             status.Height,
-			CatchingUp:         status.CatchingUp,
+			Height:              status.Height,
+			CatchingUp:          status.CatchingUp,
 			EarliestBlockHeight: status.EarliestBlockHeight,
-			VersionMonod:       status.VersionMonod,
-			VersionMonoctl:     status.VersionMonoctl,
-			ChainID:            status.ChainID,
-			EVMChainID:         status.EVMChainID,
-			PeerCount:          status.PeerCount,
+			VersionMonod:        status.VersionMonod,
+			VersionMonoctl:      status.VersionMonoctl,
+			ChainID:             status.ChainID,
+			EVMChainID:          status.EVMChainID,
+			PeerCount:           status.PeerCount,
 		},
 		Capabilities: *caps,
 	}, nil

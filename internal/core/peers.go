@@ -17,18 +17,18 @@ type Peer struct {
 
 // peersRegistryRaw is used for initial JSON parsing with flexible peer formats.
 type peersRegistryRaw struct {
-	NetworkName          string            `json:"network_name"`
-	ChainID              string            `json:"chain_id"`
-	EVMChainID           uint64            `json:"evm_chain_id"`
-	GenesisSHA           string            `json:"genesis_sha256"`
-	GenesisURL           string            `json:"genesis_url"`
-	Seeds                []json.RawMessage `json:"seeds"`
-	Peers                []json.RawMessage `json:"peers"`
-	PersistentPeers      []json.RawMessage `json:"persistent_peers"`
-	BootstrapPeers       []json.RawMessage `json:"bootstrap_peers"`
-	TrustedRPCEndpoints  []string          `json:"trusted_rpc_endpoints"`
-	PortScheme           *PortScheme       `json:"port_scheme"`
-	RPCEndpoints         *RPCEndpoints     `json:"rpc_endpoints"`
+	NetworkName         string            `json:"network_name"`
+	ChainID             string            `json:"chain_id"`
+	EVMChainID          uint64            `json:"evm_chain_id"`
+	GenesisSHA          string            `json:"genesis_sha256"`
+	GenesisURL          string            `json:"genesis_url"`
+	Seeds               []json.RawMessage `json:"seeds"`
+	Peers               []json.RawMessage `json:"peers"`
+	PersistentPeers     []json.RawMessage `json:"persistent_peers"`
+	BootstrapPeers      []json.RawMessage `json:"bootstrap_peers"`
+	TrustedRPCEndpoints []string          `json:"trusted_rpc_endpoints"`
+	PortScheme          *PortScheme       `json:"port_scheme"`
+	RPCEndpoints        *RPCEndpoints     `json:"rpc_endpoints"`
 }
 
 // PortScheme defines the port configuration for different node types.
@@ -52,18 +52,18 @@ type RPCEndpoints struct {
 
 // PeersRegistry represents a peers.json file.
 type PeersRegistry struct {
-	NetworkName          string
-	ChainID              string
-	EVMChainID           uint64
-	GenesisSHA           string
-	GenesisURL           string
-	Seeds                []Peer
-	Peers                []Peer
-	PersistentPeers      []Peer
-	BootstrapPeers       []Peer   // Archive nodes for deterministic genesis sync (pex=false)
-	TrustedRPCEndpoints  []string // Trusted RPC endpoints for state sync verification
-	PortScheme           *PortScheme
-	RPCEndpoints         *RPCEndpoints
+	NetworkName         string
+	ChainID             string
+	EVMChainID          uint64
+	GenesisSHA          string
+	GenesisURL          string
+	Seeds               []Peer
+	Peers               []Peer
+	PersistentPeers     []Peer
+	BootstrapPeers      []Peer   // Archive nodes for deterministic genesis sync (pex=false)
+	TrustedRPCEndpoints []string // Trusted RPC endpoints for state sync verification
+	PortScheme          *PortScheme
+	RPCEndpoints        *RPCEndpoints
 }
 
 // nodeIDRegex validates a Tendermint node ID (40 hex chars).
@@ -197,18 +197,18 @@ func ParsePeersRegistry(data []byte) (*PeersRegistry, error) {
 	}
 
 	return &PeersRegistry{
-		NetworkName:          raw.NetworkName,
-		ChainID:              raw.ChainID,
-		EVMChainID:           raw.EVMChainID,
-		GenesisSHA:           raw.GenesisSHA,
-		GenesisURL:           raw.GenesisURL,
-		Seeds:                seeds,
-		Peers:                peers,
-		PersistentPeers:      persistentPeers,
-		BootstrapPeers:       bootstrapPeers,
-		TrustedRPCEndpoints:  raw.TrustedRPCEndpoints,
-		PortScheme:           raw.PortScheme,
-		RPCEndpoints:         raw.RPCEndpoints,
+		NetworkName:         raw.NetworkName,
+		ChainID:             raw.ChainID,
+		EVMChainID:          raw.EVMChainID,
+		GenesisSHA:          raw.GenesisSHA,
+		GenesisURL:          raw.GenesisURL,
+		Seeds:               seeds,
+		Peers:               peers,
+		PersistentPeers:     persistentPeers,
+		BootstrapPeers:      bootstrapPeers,
+		TrustedRPCEndpoints: raw.TrustedRPCEndpoints,
+		PortScheme:          raw.PortScheme,
+		RPCEndpoints:        raw.RPCEndpoints,
 	}, nil
 }
 

@@ -85,9 +85,9 @@ pex = true
 	// Test case: drift detected
 	t.Run("drift detected", func(t *testing.T) {
 		config := &DriftConfig{
-			CosmosChainID: "different-chain",
-			EVMChainID:    999999,
-			Seeds:         []string{},
+			CosmosChainID:  "different-chain",
+			EVMChainID:     999999,
+			Seeds:          []string{},
 			BootstrapPeers: []string{},
 		}
 
@@ -108,9 +108,9 @@ pex = true
 	// Test case: no drift
 	t.Run("no drift", func(t *testing.T) {
 		config := &DriftConfig{
-			CosmosChainID: "test-chain-1",
-			EVMChainID:    262145,
-			Seeds:         []string{},
+			CosmosChainID:  "test-chain-1",
+			EVMChainID:     262145,
+			Seeds:          []string{},
 			BootstrapPeers: []string{},
 		}
 

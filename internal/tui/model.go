@@ -84,7 +84,7 @@ const (
 	SubViewInstallDeps
 	SubViewInstallMonod
 	SubViewInstallJoin
-	SubViewInstallSync   // Sync strategy selection
+	SubViewInstallSync // Sync strategy selection
 	SubViewInstallRole
 	SubViewInstallMesh
 	// Tools subviews

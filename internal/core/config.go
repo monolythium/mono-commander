@@ -14,7 +14,7 @@ import (
 type ConfigPatch struct {
 	Seeds           string
 	PersistentPeers string
-	PEX             *bool  // nil = don't change, true/false = set value
+	PEX             *bool // nil = don't change, true/false = set value
 }
 
 // CometConfig represents the structure of config.toml for safe TOML editing.
@@ -46,7 +46,7 @@ func GenerateConfigPatch(seeds []Peer, persistentPeers []Peer) *ConfigPatch {
 func GenerateBootstrapConfigPatch(bootstrapPeers []Peer) *ConfigPatch {
 	pexFalse := false
 	return &ConfigPatch{
-		Seeds:           "",                           // No seeds in bootstrap mode
+		Seeds:           "", // No seeds in bootstrap mode
 		PersistentPeers: PeersToString(bootstrapPeers),
 		PEX:             &pexFalse,
 	}

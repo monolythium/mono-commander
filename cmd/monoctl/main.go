@@ -3626,10 +3626,10 @@ func runNodeConfigure(cmd *cobra.Command, args []string) {
 			"role":    role,
 			"dry_run": dryRun,
 			"config": map[string]interface{}{
-				"seed_mode":            expectedConfig.SeedMode,
-				"pruning":              expectedConfig.Pruning,
-				"pruning_keep_recent":  expectedConfig.PruningKeepRecent,
-				"pruning_interval":     expectedConfig.PruningInterval,
+				"seed_mode":           expectedConfig.SeedMode,
+				"pruning":             expectedConfig.Pruning,
+				"pruning_keep_recent": expectedConfig.PruningKeepRecent,
+				"pruning_interval":    expectedConfig.PruningInterval,
 			},
 		}
 		data, _ := json.MarshalIndent(out, "", "  ")
