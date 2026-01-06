@@ -67,6 +67,12 @@ Or use CLI commands:
   monoctl join --network Sprintnet --home ~/.monod
   monoctl systemd install --network Sprintnet --home ~/.monod --user monod`,
 		Run: func(cmd *cobra.Command, args []string) {
+			// Refuse to run as root
+			if os.Geteuid() == 0 {
+				fmt.Fprintf(os.Stderr, "Error: monoctl must not be run as root\n")
+				fmt.Fprintf(os.Stderr, "Run as the user that will own the node home directory.\n")
+				os.Exit(1)
+			}
 			// Default: launch TUI
 			if err := tui.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -567,6 +573,92 @@ Example:
   monoctl node role --home ~/.monod`,
 		Run: runNodeRole,
 	}
+
+	// Node reset command - safe nuke
+	nodeResetCmd = &cobra.Command{
+		Use:   "reset",
+		Short: "Reset node to clean state (safe nuke)",
+		Long: `Completely reset the node home directory to a clean state.
+
+This command will:
+  1. Stop the monod systemd service (if running)
+  2. Delete the data directory (blockchain data)
+  3. Delete config files (config.toml, app.toml, genesis.json)
+  4. Optionally preserve or delete node_key.json and priv_validator_key.json
+  5. Recreate required directories with correct ownership
+
+WARNINGS:
+  - This is destructive and cannot be undone
+  - Blockchain data will be lost
+  - You will need to re-sync from genesis or snapshot
+
+Use --preserve-keys to keep node_key.json and priv_validator_key.json.
+Use --force to skip confirmation prompt.
+
+Examples:
+  monoctl node reset --home ~/.monod
+  monoctl node reset --home ~/.monod --preserve-keys
+  monoctl node reset --home ~/.monod --force`,
+		Run: runNodeReset,
+	}
+
+	// Config command group - configuration drift detection and repair
+	configCmd = &cobra.Command{
+		Use:   "config",
+		Short: "Configuration drift detection and repair",
+		Long: `Detect and repair configuration drift from canonical network values.
+
+The canonical source of truth for network configuration is the monolythium/networks
+repository. This command group helps ensure your node configuration matches the
+canonical values to prevent consensus failures.
+
+Commands:
+  monoctl config doctor --network <network>  # Detect configuration drift
+  monoctl config repair --network <network>  # Repair configuration drift`,
+	}
+
+	configDoctorCmd = &cobra.Command{
+		Use:   "doctor",
+		Short: "Detect configuration drift from canonical values",
+		Long: `Check node configuration against canonical network values.
+
+Detects drift in critical configuration fields:
+  - chain-id in client.toml (CRITICAL - causes consensus failure)
+  - evm-chain-id in app.toml (CRITICAL - causes AppHash mismatch)
+  - seeds in config.toml (WARNING - affects connectivity)
+  - persistent_peers in config.toml (WARNING - affects connectivity)
+
+CRITICAL drift must be fixed immediately as it will cause consensus failures.
+WARNING drift affects network connectivity but won't cause consensus issues.
+
+Examples:
+  monoctl config doctor --network Sprintnet --home ~/.monod
+  monoctl config doctor --network Sprintnet --home ~/.monod --json`,
+		Run: runConfigDoctor,
+	}
+
+	configRepairCmd = &cobra.Command{
+		Use:   "repair",
+		Short: "Repair configuration drift to canonical values",
+		Long: `Repair configuration drift by updating TOML files to canonical values.
+
+This command regenerates configuration values from the canonical network config:
+  - Updates chain-id in client.toml
+  - Updates evm-chain-id in app.toml
+  - Updates seeds in config.toml
+  - Updates persistent_peers in config.toml
+
+Keys are preserved:
+  - node_key.json (node identity)
+  - priv_validator_key.json (validator signing key)
+
+Use --dry-run to preview changes without applying them.
+
+Examples:
+  monoctl config repair --network Sprintnet --home ~/.monod --dry-run
+  monoctl config repair --network Sprintnet --home ~/.monod`,
+		Run: runConfigRepair,
+	}
 )
 
 func init() {
@@ -587,6 +679,8 @@ func init() {
 	joinCmd.Flags().String("genesis-sha256", "", "Expected SHA256 of genesis file")
 	joinCmd.Flags().String("peers-url", "", "Peers registry URL (uses network default if not specified)")
 	joinCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	joinCmd.Flags().String("moniker", "", "Node moniker (auto-generated from hostname if not specified)")
+	joinCmd.Flags().String("monod-path", "", "Path to monod binary (auto-detected if not specified)")
 	joinCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
 	joinCmd.Flags().Bool("bootstrap", false, "Use bootstrap mode: trusted peers only, pex=false (recommended for deterministic sync)")
 	joinCmd.Flags().Bool("clear-addrbook", false, "Clear addrbook.json to avoid poisoned peers")
@@ -832,7 +926,28 @@ func init() {
 	nodeRoleCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
 	nodeCmd.AddCommand(nodeRoleCmd)
 
+	// Node reset flags
+	nodeResetCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	nodeResetCmd.Flags().Bool("preserve-keys", false, "Preserve node_key.json and priv_validator_key.json")
+	nodeResetCmd.Flags().Bool("force", false, "Skip confirmation prompt")
+	nodeResetCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	nodeCmd.AddCommand(nodeResetCmd)
+
 	rootCmd.AddCommand(nodeCmd)
+
+	// Config commands - drift detection and repair
+	configDoctorCmd.Flags().String("network", "", "Network name (Sprintnet, Testnet, Mainnet)")
+	configDoctorCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	configDoctorCmd.MarkFlagRequired("network")
+	configCmd.AddCommand(configDoctorCmd)
+
+	configRepairCmd.Flags().String("network", "", "Network name (Sprintnet, Testnet, Mainnet)")
+	configRepairCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
+	configRepairCmd.Flags().Bool("dry-run", false, "Preview changes without applying them")
+	configRepairCmd.MarkFlagRequired("network")
+	configCmd.AddCommand(configRepairCmd)
+
+	rootCmd.AddCommand(configCmd)
 }
 
 // addTxFlags adds common transaction flags to a command
@@ -893,11 +1008,20 @@ func runNetworksList(cmd *cobra.Command, args []string) {
 }
 
 func runJoin(cmd *cobra.Command, args []string) {
+	// Refuse to run as root
+	if os.Geteuid() == 0 {
+		fmt.Fprintf(os.Stderr, "Error: monoctl must not be run as root\n")
+		fmt.Fprintf(os.Stderr, "Run as the user that will own the node home directory.\n")
+		os.Exit(1)
+	}
+
 	networkStr, _ := cmd.Flags().GetString("network")
 	genesisURL, _ := cmd.Flags().GetString("genesis-url")
 	genesisSHA, _ := cmd.Flags().GetString("genesis-sha256")
 	peersURL, _ := cmd.Flags().GetString("peers-url")
 	home, _ := cmd.Flags().GetString("home")
+	moniker, _ := cmd.Flags().GetString("moniker")
+	monodPath, _ := cmd.Flags().GetString("monod-path")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	bootstrap, _ := cmd.Flags().GetBool("bootstrap")
 	clearAddrbook, _ := cmd.Flags().GetBool("clear-addrbook")
@@ -939,6 +1063,8 @@ func runJoin(cmd *cobra.Command, args []string) {
 		Logger:        logger,
 		SyncStrategy:  syncStrategy,
 		ClearAddrbook: clearAddrbook,
+		Moniker:       moniker,
+		MonodPath:     monodPath,
 	}
 
 	fetcher := net.NewHTTPFetcher()
@@ -987,12 +1113,23 @@ func runJoin(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Println()
-	fmt.Printf("Genesis written to: %s\n", result.GenesisPath)
+	fmt.Printf("Node home: %s\n", home)
 	fmt.Printf("Chain ID: %s\n", result.ChainID)
+	if result.NodeID != "" {
+		fmt.Printf("Node ID: %s\n", result.NodeID)
+	}
 
 	if dryRun {
-		fmt.Println("\nConfig patch that would be applied:")
+		fmt.Println("\nConfig that would be applied:")
 		fmt.Println(result.ConfigPatch)
+	}
+
+	if result.Success && !dryRun {
+		fmt.Println()
+		fmt.Println("Node is ready. Next steps:")
+		fmt.Println("  1. Install systemd service: monoctl systemd install --network", networkStr, "--user", os.Getenv("USER"))
+		fmt.Println("  2. Start the node: sudo systemctl start monod")
+		fmt.Println("  3. Check status: monoctl status --network", networkStr)
 	}
 }
 
@@ -3505,5 +3642,390 @@ func runNodeRole(cmd *cobra.Command, args []string) {
 		if issue.Severity == "CRITICAL" {
 			os.Exit(1)
 		}
+	}
+}
+
+func runNodeReset(cmd *cobra.Command, args []string) {
+	home, _ := cmd.Flags().GetString("home")
+	preserveKeys, _ := cmd.Flags().GetBool("preserve-keys")
+	force, _ := cmd.Flags().GetBool("force")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	// Refuse to run as root
+	if os.Geteuid() == 0 {
+		fmt.Fprintf(os.Stderr, "Error: monoctl must not be run as root\n")
+		fmt.Fprintf(os.Stderr, "Run as the user that owns the node home directory.\n")
+		os.Exit(1)
+	}
+
+	// Default home
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, ".monod")
+	} else if strings.HasPrefix(home, "~") {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, strings.TrimPrefix(home, "~"))
+	}
+	home, _ = filepath.Abs(home)
+
+	// Check that home directory exists
+	if _, err := os.Stat(home); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: node home directory does not exist: %s\n", home)
+		fmt.Fprintf(os.Stderr, "Nothing to reset.\n")
+		os.Exit(1)
+	}
+
+	// Verify this looks like a monod home directory
+	configDir := filepath.Join(home, "config")
+	dataDir := filepath.Join(home, "data")
+
+	hasConfig := false
+	hasData := false
+	if _, err := os.Stat(configDir); err == nil {
+		hasConfig = true
+	}
+	if _, err := os.Stat(dataDir); err == nil {
+		hasData = true
+	}
+
+	if !hasConfig && !hasData {
+		fmt.Fprintf(os.Stderr, "Error: %s does not look like a monod home directory\n", home)
+		fmt.Fprintf(os.Stderr, "Expected to find config/ or data/ subdirectory.\n")
+		os.Exit(1)
+	}
+
+	fmt.Println("Node Reset")
+	fmt.Println(strings.Repeat("=", 50))
+	fmt.Printf("Home: %s\n", home)
+	fmt.Println()
+
+	// List what will be deleted
+	fmt.Println("The following will be DELETED:")
+	fmt.Printf("  - %s/* (blockchain data)\n", dataDir)
+	fmt.Printf("  - %s/config.toml\n", home)
+	fmt.Printf("  - %s/app.toml\n", home)
+	fmt.Printf("  - %s/client.toml\n", home)
+	fmt.Printf("  - %s/genesis.json\n", home)
+	fmt.Printf("  - %s/addrbook.json\n", home)
+
+	if preserveKeys {
+		fmt.Println()
+		fmt.Println("The following will be PRESERVED:")
+		fmt.Printf("  - %s/config/node_key.json\n", home)
+		fmt.Printf("  - %s/config/priv_validator_key.json\n", home)
+	} else {
+		fmt.Printf("  - %s/config/node_key.json\n", home)
+		fmt.Printf("  - %s/config/priv_validator_key.json\n", home)
+	}
+	fmt.Println()
+
+	if dryRun {
+		fmt.Println("(DRY RUN - no changes will be made)")
+		return
+	}
+
+	// Confirmation
+	if !force {
+		fmt.Print("This action is DESTRUCTIVE and cannot be undone.\n")
+		fmt.Print("Type 'yes' to confirm: ")
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
+		if response != "yes" {
+			fmt.Println("Aborted.")
+			os.Exit(0)
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("Resetting node...")
+
+	// Step 1: Stop monod service
+	fmt.Print("[1/5] Stopping monod service... ")
+	stopCmd := exec.Command("systemctl", "--user", "stop", "monod")
+	if err := stopCmd.Run(); err != nil {
+		// Try system-level service
+		stopCmd = exec.Command("sudo", "systemctl", "stop", "monod")
+		stopCmd.Run() // Ignore errors - service might not exist
+	}
+	// Also kill any running monod processes
+	exec.Command("pkill", "-f", "monod start").Run()
+	time.Sleep(time.Second)
+	fmt.Println("done")
+
+	// Step 2: Backup keys if preserving
+	var nodeKeyBackup, privValKeyBackup []byte
+	if preserveKeys {
+		fmt.Print("[2/5] Backing up keys... ")
+		nodeKeyPath := filepath.Join(configDir, "node_key.json")
+		privValKeyPath := filepath.Join(configDir, "priv_validator_key.json")
+
+		if data, err := os.ReadFile(nodeKeyPath); err == nil {
+			nodeKeyBackup = data
+		}
+		if data, err := os.ReadFile(privValKeyPath); err == nil {
+			privValKeyBackup = data
+		}
+		fmt.Println("done")
+	} else {
+		fmt.Println("[2/5] Not preserving keys")
+	}
+
+	// Step 3: Delete everything
+	fmt.Print("[3/5] Deleting node data... ")
+
+	// Delete ENTIRE data directory (not just contents) - this ensures all *.db directories are removed
+	if err := os.RemoveAll(dataDir); err != nil {
+		fmt.Fprintf(os.Stderr, "\nError: failed to remove data dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Delete config files
+	filesToDelete := []string{
+		filepath.Join(configDir, "config.toml"),
+		filepath.Join(configDir, "app.toml"),
+		filepath.Join(configDir, "client.toml"),
+		filepath.Join(configDir, "genesis.json"),
+		filepath.Join(configDir, "addrbook.json"),
+		filepath.Join(configDir, "config_patch.toml"),
+	}
+
+	if !preserveKeys {
+		filesToDelete = append(filesToDelete,
+			filepath.Join(configDir, "node_key.json"),
+			filepath.Join(configDir, "priv_validator_key.json"),
+		)
+	}
+
+	for _, f := range filesToDelete {
+		os.Remove(f)
+	}
+	fmt.Println("done")
+
+	// Step 4: Recreate directories and restore keys
+	fmt.Print("[4/5] Recreating directories... ")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config dir: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating data dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create empty priv_validator_state.json
+	privValState := `{"height": "0", "round": 0, "step": 0}`
+	if err := os.WriteFile(filepath.Join(dataDir, "priv_validator_state.json"), []byte(privValState), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create priv_validator_state.json: %v\n", err)
+	}
+
+	// Restore keys if backed up
+	if preserveKeys {
+		if len(nodeKeyBackup) > 0 {
+			os.WriteFile(filepath.Join(configDir, "node_key.json"), nodeKeyBackup, 0600)
+		}
+		if len(privValKeyBackup) > 0 {
+			os.WriteFile(filepath.Join(configDir, "priv_validator_key.json"), privValKeyBackup, 0600)
+		}
+	}
+	fmt.Println("done")
+
+	// Step 5: Verify reset was successful
+	fmt.Print("[5/5] Verifying reset... ")
+
+	// Check that data directory is clean (only priv_validator_state.json should exist)
+	dirtyFiles := []string{"state.db", "application.db", "blockstore.db", "tx_index.db", "evidence.db"}
+	for _, df := range dirtyFiles {
+		checkPath := filepath.Join(dataDir, df)
+		if _, err := os.Stat(checkPath); err == nil {
+			fmt.Fprintf(os.Stderr, "\nError: reset verification failed - %s still exists\n", checkPath)
+			fmt.Fprintf(os.Stderr, "Data directory was not properly cleaned.\n")
+			os.Exit(1)
+		}
+	}
+
+	// Check that addrbook.json is removed
+	addrbookPath := filepath.Join(configDir, "addrbook.json")
+	if _, err := os.Stat(addrbookPath); err == nil {
+		fmt.Fprintf(os.Stderr, "\nError: reset verification failed - addrbook.json still exists\n")
+		os.Exit(1)
+	}
+
+	fmt.Println("done")
+
+	fmt.Println()
+	fmt.Println("Reset complete!")
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Printf("  monoctl join --network <network> --home %s\n", home)
+}
+
+// =============================================================================
+// Config Doctor Command - Drift Detection
+// =============================================================================
+
+func runConfigDoctor(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+
+	// Default home directory
+	if home == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: could not determine home directory: %v\n", err)
+			os.Exit(1)
+		}
+		home = filepath.Join(homeDir, ".monod")
+	}
+
+	// Parse network name
+	networkName, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Fetch canonical config
+	network, err := core.GetNetworkFromCanonical(networkName, "main")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching canonical config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create drift config from canonical network
+	driftConfig := &core.DriftConfig{
+		CosmosChainID:  network.ChainID,
+		EVMChainID:     network.EVMChainID,
+		Seeds:          []string{}, // Seeds come from canonical config
+		BootstrapPeers: []string{}, // Peers come from canonical config
+	}
+
+	// Detect drift
+	results, err := core.DetectDrift(home, driftConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error detecting drift: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		// JSON output
+		type driftOutput struct {
+			Network     string             `json:"network"`
+			Home        string             `json:"home"`
+			DriftCount  int                `json:"drift_count"`
+			HasCritical bool               `json:"has_critical"`
+			Results     []core.DriftResult `json:"results"`
+		}
+		out := driftOutput{
+			Network:     string(networkName),
+			Home:        home,
+			DriftCount:  len(results),
+			HasCritical: core.HasCriticalDrift(results),
+			Results:     results,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(out)
+		if core.HasCriticalDrift(results) {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Human-readable output
+	fmt.Printf("Network: %s\n", networkName)
+	fmt.Printf("Home: %s\n", home)
+	fmt.Println()
+
+	if len(results) == 0 {
+		fmt.Println("No drift detected. Configuration matches canonical values.")
+		return
+	}
+
+	fmt.Println(core.FormatDriftReport(results))
+
+	if core.HasCriticalDrift(results) {
+		fmt.Println()
+		fmt.Printf("Run: monoctl config repair --network %s --home %s\n", networkStr, home)
+		os.Exit(1)
+	}
+}
+
+// =============================================================================
+// Config Repair Command - Drift Repair
+// =============================================================================
+
+func runConfigRepair(cmd *cobra.Command, args []string) {
+	networkStr, _ := cmd.Flags().GetString("network")
+	home, _ := cmd.Flags().GetString("home")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+	// Default home directory
+	if home == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: could not determine home directory: %v\n", err)
+			os.Exit(1)
+		}
+		home = filepath.Join(homeDir, ".monod")
+	}
+
+	// Parse network name
+	networkName, err := core.ParseNetworkName(networkStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Fetch canonical config
+	network, err := core.GetNetworkFromCanonical(networkName, "main")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching canonical config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create drift config from canonical network
+	driftConfig := &core.DriftConfig{
+		CosmosChainID:  network.ChainID,
+		EVMChainID:     network.EVMChainID,
+		Seeds:          []string{}, // Seeds come from canonical config
+		BootstrapPeers: []string{}, // Peers come from canonical config
+	}
+
+	// Perform repair
+	results, err := core.Repair(home, driftConfig, dryRun)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error repairing configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOutput {
+		// JSON output
+		type repairOutput struct {
+			Network string              `json:"network"`
+			Home    string              `json:"home"`
+			DryRun  bool                `json:"dry_run"`
+			Results []core.RepairResult `json:"results"`
+		}
+		out := repairOutput{
+			Network: string(networkName),
+			Home:    home,
+			DryRun:  dryRun,
+			Results: results,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(out)
+		return
+	}
+
+	// Human-readable output
+	fmt.Println(core.FormatRepairReport(results, dryRun))
+
+	if !dryRun && len(results) > 0 {
+		fmt.Println()
+		fmt.Printf("Run: monoctl config doctor --network %s --home %s\n", networkStr, home)
+		fmt.Println("to verify the repair was successful.")
 	}
 }
