@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// LocalnetEVMChainID is the EVM chain ID reserved for Localnet development.
+// This value MUST NOT be used by any production network.
+const LocalnetEVMChainID = 262145
+
 // NetworkName represents a canonical network name.
 type NetworkName string
 
@@ -142,4 +146,79 @@ func (n Network) SeedString(port int) string {
 		seeds[i] = fmt.Sprintf("%s:%d", dns, port)
 	}
 	return strings.Join(seeds, ",")
+}
+
+// GetNetworkFromCanonical fetches network configuration from the canonical
+// networks repository. For Localnet, it returns embedded defaults.
+// For all other networks, it fetches from the networks repo with cache fallback.
+//
+// This is the preferred method for getting network configuration as it
+// ensures consistency with the canonical source of truth.
+func GetNetworkFromCanonical(name NetworkName, ref string) (Network, error) {
+	// Localnet always uses embedded defaults - it's a local development network
+	if name == NetworkLocalnet {
+		return networks[NetworkLocalnet], nil
+	}
+
+	// Map NetworkName to lowercase for fetch
+	networkID := strings.ToLower(string(name))
+
+	// Fetch from canonical source with cache fallback
+	config, err := GetNetworkConfigWithCache(networkID, ref)
+	if err != nil {
+		// Fall back to embedded config if fetch fails
+		n, ok := networks[name]
+		if !ok {
+			return Network{}, fmt.Errorf("network %s not found and fetch failed: %w", name, err)
+		}
+		return n, nil
+	}
+
+	// Validate the fetched config
+	if err := VerifyNetworkConfig(config); err != nil {
+		return Network{}, fmt.Errorf("canonical config validation failed: %w", err)
+	}
+
+	// Check for Localnet EVM chain ID leak (CRITICAL)
+	if err := ValidateNotLocalnetLeak(config); err != nil {
+		return Network{}, err
+	}
+
+	// Convert NetworkConfig to Network struct
+	return NetworkConfigToNetwork(config), nil
+}
+
+// ValidateNotLocalnetLeak ensures a non-Localnet network doesn't use Localnet's EVM chain ID.
+// This prevents the critical bug where production networks accidentally use 262145.
+func ValidateNotLocalnetLeak(config *NetworkConfig) error {
+	if config.NetworkName != "Localnet" && config.EVMChainID == LocalnetEVMChainID {
+		return fmt.Errorf("FATAL: Localnet EVM chain ID (%d) detected for %s. "+
+			"This is a configuration error that will cause consensus failures. "+
+			"Expected EVM chain ID for %s is NOT %d",
+			LocalnetEVMChainID, config.NetworkName, config.NetworkName, LocalnetEVMChainID)
+	}
+	return nil
+}
+
+// NetworkConfigToNetwork converts a NetworkConfig (from networks repo) to a Network struct.
+// This provides backwards compatibility with existing code that uses the Network struct.
+func NetworkConfigToNetwork(config *NetworkConfig) Network {
+	return Network{
+		Name:       NetworkName(config.NetworkName),
+		ChainID:    config.CosmosChainID,
+		EVMChainID: config.EVMChainID,
+		SeedDNS:    []string{}, // Seeds are now in node_id@host:port format in config.Seeds
+		GenesisURL: config.GenesisURL,
+		PeersURL:   "", // Peers are now embedded in the NetworkConfig
+	}
+}
+
+// GetNetworkConfigAsDriftConfig converts a NetworkConfig to a DriftConfig for drift detection.
+func GetNetworkConfigAsDriftConfig(config *NetworkConfig) *DriftConfig {
+	return &DriftConfig{
+		CosmosChainID:  config.CosmosChainID,
+		EVMChainID:     config.EVMChainID,
+		Seeds:          config.Seeds,
+		BootstrapPeers: config.BootstrapPeers,
+	}
 }

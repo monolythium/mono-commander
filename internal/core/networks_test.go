@@ -222,3 +222,168 @@ func TestDefaultPeersURLSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateNotLocalnetLeak(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      *NetworkConfig
+		expectError bool
+	}{
+		{
+			name: "Sprintnet with correct EVM chain ID",
+			config: &NetworkConfig{
+				NetworkName: "Sprintnet",
+				EVMChainID:  262146,
+			},
+			expectError: false,
+		},
+		{
+			name: "Sprintnet with Localnet EVM chain ID (leak)",
+			config: &NetworkConfig{
+				NetworkName: "Sprintnet",
+				EVMChainID:  262145,
+			},
+			expectError: true,
+		},
+		{
+			name: "Testnet with correct EVM chain ID",
+			config: &NetworkConfig{
+				NetworkName: "Testnet",
+				EVMChainID:  262147,
+			},
+			expectError: false,
+		},
+		{
+			name: "Testnet with Localnet EVM chain ID (leak)",
+			config: &NetworkConfig{
+				NetworkName: "Testnet",
+				EVMChainID:  262145,
+			},
+			expectError: true,
+		},
+		{
+			name: "Mainnet with correct EVM chain ID",
+			config: &NetworkConfig{
+				NetworkName: "Mainnet",
+				EVMChainID:  262148,
+			},
+			expectError: false,
+		},
+		{
+			name: "Mainnet with Localnet EVM chain ID (leak)",
+			config: &NetworkConfig{
+				NetworkName: "Mainnet",
+				EVMChainID:  262145,
+			},
+			expectError: true,
+		},
+		{
+			name: "Localnet with Localnet EVM chain ID (OK)",
+			config: &NetworkConfig{
+				NetworkName: "Localnet",
+				EVMChainID:  262145,
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateNotLocalnetLeak(tt.config)
+			if tt.expectError && err == nil {
+				t.Errorf("Expected error for %s with EVM chain ID %d, but got nil",
+					tt.config.NetworkName, tt.config.EVMChainID)
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("Expected no error for %s with EVM chain ID %d, but got: %v",
+					tt.config.NetworkName, tt.config.EVMChainID, err)
+			}
+		})
+	}
+}
+
+func TestNetworkConfigToNetwork(t *testing.T) {
+	config := &NetworkConfig{
+		NetworkName:    "Sprintnet",
+		CosmosChainID:  "mono-sprint-1",
+		EVMChainID:     262146,
+		GenesisURL:     "https://example.com/genesis.json",
+		Seeds:          []string{"node1@seed1.example.com:26656"},
+		BootstrapPeers: []string{"node2@peer1.example.com:26656"},
+	}
+
+	network := NetworkConfigToNetwork(config)
+
+	if network.Name != NetworkSprintnet {
+		t.Errorf("Expected network name Sprintnet, got %s", network.Name)
+	}
+	if network.ChainID != "mono-sprint-1" {
+		t.Errorf("Expected chain ID mono-sprint-1, got %s", network.ChainID)
+	}
+	if network.EVMChainID != 262146 {
+		t.Errorf("Expected EVM chain ID 262146, got %d", network.EVMChainID)
+	}
+	if network.GenesisURL != "https://example.com/genesis.json" {
+		t.Errorf("Expected genesis URL, got %s", network.GenesisURL)
+	}
+}
+
+func TestGetNetworkConfigAsDriftConfig(t *testing.T) {
+	config := &NetworkConfig{
+		NetworkName:    "Sprintnet",
+		CosmosChainID:  "mono-sprint-1",
+		EVMChainID:     262146,
+		Seeds:          []string{"node1@seed1.example.com:26656"},
+		BootstrapPeers: []string{"node2@peer1.example.com:26656"},
+	}
+
+	driftConfig := GetNetworkConfigAsDriftConfig(config)
+
+	if driftConfig.CosmosChainID != "mono-sprint-1" {
+		t.Errorf("Expected cosmos chain ID mono-sprint-1, got %s", driftConfig.CosmosChainID)
+	}
+	if driftConfig.EVMChainID != 262146 {
+		t.Errorf("Expected EVM chain ID 262146, got %d", driftConfig.EVMChainID)
+	}
+	if len(driftConfig.Seeds) != 1 {
+		t.Errorf("Expected 1 seed, got %d", len(driftConfig.Seeds))
+	}
+	if len(driftConfig.BootstrapPeers) != 1 {
+		t.Errorf("Expected 1 bootstrap peer, got %d", len(driftConfig.BootstrapPeers))
+	}
+}
+
+func TestLocalnetEVMChainIDConstant(t *testing.T) {
+	// Verify the constant matches the embedded network config
+	if LocalnetEVMChainID != 262145 {
+		t.Errorf("LocalnetEVMChainID should be 262145, got %d", LocalnetEVMChainID)
+	}
+
+	localnet, err := GetNetwork(NetworkLocalnet)
+	if err != nil {
+		t.Fatalf("Failed to get Localnet: %v", err)
+	}
+
+	if localnet.EVMChainID != LocalnetEVMChainID {
+		t.Errorf("Localnet EVMChainID (%d) doesn't match LocalnetEVMChainID constant (%d)",
+			localnet.EVMChainID, LocalnetEVMChainID)
+	}
+}
+
+func TestGetNetworkFromCanonical_Localnet(t *testing.T) {
+	// Localnet should always return embedded config
+	network, err := GetNetworkFromCanonical(NetworkLocalnet, "main")
+	if err != nil {
+		t.Fatalf("GetNetworkFromCanonical failed for Localnet: %v", err)
+	}
+
+	if network.Name != NetworkLocalnet {
+		t.Errorf("Expected Localnet, got %s", network.Name)
+	}
+	if network.EVMChainID != 262145 {
+		t.Errorf("Expected EVM chain ID 262145, got %d", network.EVMChainID)
+	}
+	if network.ChainID != "mono-local-1" {
+		t.Errorf("Expected chain ID mono-local-1, got %s", network.ChainID)
+	}
+}
