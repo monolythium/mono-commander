@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # Verify tag is on prod branch
+  verify-branch:
+    name: Verify Tag Branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag is on prod branch
+        run: |
+          # Get the commit the tag points to
+          TAG_COMMIT=$(git rev-list -n 1 ${{ github.ref_name }})
+
+          # Check if this commit is reachable from prod
+          if git merge-base --is-ancestor $TAG_COMMIT origin/prod; then
+            echo "Tag ${{ github.ref_name }} is on prod branch"
+          else
+            echo "ERROR: Tag ${{ github.ref_name }} is NOT on prod branch"
+            echo "Releases must only be created from the prod branch"
+            exit 1
+          fi
+
+  release:
+    name: Build and Release
+    needs: verify-branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          LDFLAGS="-X github.com/monolythium/mono-commander/internal/tui.Version=${VERSION}"
+
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/monoctl-linux-amd64 ./cmd/monoctl
+
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/monoctl-linux-arm64 ./cmd/monoctl
+
+          # macOS AMD64
+          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/monoctl-darwin-amd64 ./cmd/monoctl
+
+          # macOS ARM64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/monoctl-darwin-arm64 ./cmd/monoctl
+
+          # Generate checksums
+          cd dist
+          sha256sum monoctl-* > checksums.txt
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: monoctl ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          generate_release_notes: true
+          files: |
+            dist/monoctl-linux-amd64
+            dist/monoctl-linux-arm64
+            dist/monoctl-darwin-amd64
+            dist/monoctl-darwin-arm64
+            dist/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
