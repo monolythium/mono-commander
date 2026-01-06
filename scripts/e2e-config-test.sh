@@ -56,21 +56,27 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Expected EVM chain IDs
-declare -A EXPECTED_EVM_CHAIN_ID=(
-    ["Localnet"]=262145
-    ["Sprintnet"]=262146
-    ["Testnet"]=262147
-    ["Mainnet"]=262148
-)
+# Expected EVM chain IDs (portable approach for bash 3.x)
+get_expected_evm_chain_id() {
+    case "$1" in
+        Localnet)  echo "262145" ;;
+        Sprintnet) echo "262146" ;;
+        Testnet)   echo "262147" ;;
+        Mainnet)   echo "262148" ;;
+        *)         echo "" ;;
+    esac
+}
 
 # Expected Cosmos chain IDs
-declare -A EXPECTED_COSMOS_CHAIN_ID=(
-    ["Localnet"]="mono-local-1"
-    ["Sprintnet"]="mono-sprint-1"
-    ["Testnet"]="mono-test-1"
-    ["Mainnet"]="mono-1"
-)
+get_expected_cosmos_chain_id() {
+    case "$1" in
+        Localnet)  echo "mono-local-1" ;;
+        Sprintnet) echo "mono-sprint-1" ;;
+        Testnet)   echo "mono-test-1" ;;
+        Mainnet)   echo "mono-1" ;;
+        *)         echo "" ;;
+    esac
+}
 
 # Test counters
 TESTS_PASSED=0
@@ -113,7 +119,7 @@ check_prerequisites() {
     pass "monoctl found: $(which monoctl)"
 
     # Check network is valid
-    if [[ -z "${EXPECTED_EVM_CHAIN_ID[$NETWORK]:-}" ]]; then
+    if [[ -z "$(get_expected_evm_chain_id "$NETWORK")" ]]; then
         log_error "Unknown network: $NETWORK"
         exit 1
     fi
@@ -170,8 +176,8 @@ test_doctor_no_drift() {
 test_verify_values() {
     log_test "Test 3: Verify configuration values"
 
-    local expected_evm="${EXPECTED_EVM_CHAIN_ID[$NETWORK]}"
-    local expected_cosmos="${EXPECTED_COSMOS_CHAIN_ID[$NETWORK]}"
+    local expected_evm="$(get_expected_evm_chain_id "$NETWORK")"
+    local expected_cosmos="$(get_expected_cosmos_chain_id "$NETWORK")"
 
     # Check EVM chain ID
     local actual_evm=$(grep -E "^evm-chain-id" "$HOME_DIR/config/app.toml" | grep -oE '[0-9]+' || echo "not found")
@@ -194,12 +200,14 @@ test_verify_values() {
 test_introduce_drift() {
     log_test "Test 4: Introduce configuration drift"
 
+    local expected_evm="$(get_expected_evm_chain_id "$NETWORK")"
+
     # Backup original files
     cp "$HOME_DIR/config/app.toml" "$HOME_DIR/config/app.toml.backup"
     cp "$HOME_DIR/config/client.toml" "$HOME_DIR/config/client.toml.backup"
 
     # Introduce EVM chain ID drift (set to Localnet value)
-    sed -i.bak "s/evm-chain-id = ${EXPECTED_EVM_CHAIN_ID[$NETWORK]}/evm-chain-id = 262145/" "$HOME_DIR/config/app.toml"
+    sed -i.bak "s/evm-chain-id = ${expected_evm}/evm-chain-id = 262145/" "$HOME_DIR/config/app.toml"
     pass "Introduced EVM chain ID drift: 262145 (Localnet leak)"
 
     # Introduce Cosmos chain ID drift
@@ -264,7 +272,7 @@ test_repair_actual() {
     fi
 
     # Verify EVM chain ID was repaired
-    local expected_evm="${EXPECTED_EVM_CHAIN_ID[$NETWORK]}"
+    local expected_evm="$(get_expected_evm_chain_id "$NETWORK")"
     local actual_evm=$(grep -E "^evm-chain-id" "$HOME_DIR/config/app.toml" | grep -oE '[0-9]+' || echo "not found")
     if [[ "$actual_evm" == "$expected_evm" ]]; then
         pass "EVM chain ID repaired: $actual_evm"
@@ -301,7 +309,8 @@ test_localnet_leak_prevention() {
     fi
 
     # Try to manually set EVM chain ID to Localnet value
-    sed -i.bak "s/evm-chain-id = ${EXPECTED_EVM_CHAIN_ID[$NETWORK]}/evm-chain-id = 262145/" "$HOME_DIR/config/app.toml"
+    local expected_evm="$(get_expected_evm_chain_id "$NETWORK")"
+    sed -i.bak "s/evm-chain-id = ${expected_evm}/evm-chain-id = 262145/" "$HOME_DIR/config/app.toml"
 
     # Doctor should detect this as FATAL
     output=$(monoctl doctor --network "$NETWORK" --home "$HOME_DIR" 2>&1) || true
