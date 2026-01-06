@@ -299,8 +299,8 @@ Recommended configuration:
 Check for updates:
   monoctl update check [--json]
 
-Apply updates:
-  monoctl update apply [--yes] [--insecure] [--dry-run]
+Self-update to latest version:
+  monoctl update self [--yes] [--insecure] [--dry-run]
 
 Updates are verified using SHA256 checksums from the release.`,
 	}
@@ -311,10 +311,25 @@ Updates are verified using SHA256 checksums from the release.`,
 		Run:   runUpdateCheck,
 	}
 
-	updateApplyCmd = &cobra.Command{
-		Use:   "apply",
-		Short: "Apply Commander update",
-		Run:   runUpdateApply,
+	updateSelfCmd = &cobra.Command{
+		Use:   "self",
+		Short: "Update monoctl to the latest version",
+		Long: `Download and install the latest version of monoctl.
+
+This command will:
+  1. Check for the latest release on GitHub
+  2. Download the correct binary for your OS/architecture
+  3. Verify the checksum
+  4. Replace the current binary (creating a backup)
+
+If the binary is in a system location (e.g., /usr/local/bin), you may
+need to run with sudo or manually move the downloaded binary.
+
+Examples:
+  monoctl update self           # Interactive update
+  monoctl update self --yes     # Skip confirmation
+  monoctl update self --dry-run # Show what would happen`,
+		Run: runUpdateSelf,
 	}
 
 	// Wallet command group
@@ -953,10 +968,10 @@ func init() {
 	// M7: Update commands
 	updateCmd.AddCommand(updateCheckCmd)
 
-	updateApplyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	updateApplyCmd.Flags().Bool("insecure", false, "Skip checksum verification (not recommended)")
-	updateApplyCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
-	updateCmd.AddCommand(updateApplyCmd)
+	updateSelfCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	updateSelfCmd.Flags().Bool("insecure", false, "Skip checksum verification (not recommended)")
+	updateSelfCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	updateCmd.AddCommand(updateSelfCmd)
 
 	rootCmd.AddCommand(updateCmd)
 
@@ -2355,7 +2370,7 @@ func runUpdateCheck(cmd *cobra.Command, args []string) {
 	}
 }
 
-func runUpdateApply(cmd *cobra.Command, args []string) {
+func runUpdateSelf(cmd *cobra.Command, args []string) {
 	yes, _ := cmd.Flags().GetBool("yes")
 	insecure, _ := cmd.Flags().GetBool("insecure")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
