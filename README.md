@@ -147,6 +147,39 @@ monoctl health --network Sprintnet
 monoctl health --network Sprintnet --json
 ```
 
+### Configuration Drift Detection
+
+Detect configuration drift from canonical network values:
+
+```bash
+# Check for drift against canonical config
+monoctl doctor --network Sprintnet --home ~/.monod
+
+# Output example:
+# Network: Sprintnet
+# Config Pin: prod (e1ba912)
+#
+# DRIFT DETECTED:
+# [CRITICAL] app.toml evm-chain-id: expected 262146, got 262145
+# [WARNING] config.toml seeds: expected 2 entries, got 0
+```
+
+### Repair Configuration Drift
+
+Fix detected configuration drift:
+
+```bash
+# Preview repairs (dry run)
+monoctl repair --network Sprintnet --home ~/.monod --dry-run
+
+# Apply repairs
+monoctl repair --network Sprintnet --home ~/.monod
+```
+
+**Important:** The `repair` command regenerates TOML files from canonical config while preserving:
+- `node_key.json` (node identity)
+- `priv_validator_key.json` (validator key)
+
 ### Mesh/Rosetta API Sidecar
 
 The Mesh/Rosetta API is a compatibility layer for blockchain integrations. It is optional but recommended for RPC/indexer nodes.
@@ -322,6 +355,18 @@ go build -ldflags "-X github.com/monolythium/mono-commander/internal/tui.Version
 **Wrong chain-id?**
 - Ensure you're connected to the correct network
 - Check genesis.json matches the expected network
+- Run `monoctl doctor --network <network>` to detect drift
+
+**AppHash mismatch?**
+- This often indicates EVM chain ID mismatch between nodes
+- Check: `grep evm-chain-id ~/.monod/config/app.toml`
+- For Sprintnet, must show: `evm-chain-id = 262146`
+- Fix: `monoctl repair --network Sprintnet --home ~/.monod`
+
+**"FATAL: Localnet EVM chain ID detected"?**
+- The node is misconfigured with Localnet's EVM chain ID (262145)
+- This causes consensus failures on non-Localnet networks
+- Fix: `monoctl repair --network <network> --home ~/.monod`
 
 **Ports in use?**
 - Stop conflicting services: `lsof -i :26657`
@@ -330,6 +375,8 @@ go build -ldflags "-X github.com/monolythium/mono-commander/internal/tui.Version
 **Systemd not present?**
 - Systemd is required for service management on Linux
 - On macOS, use launchd or run manually
+
+For detailed configuration architecture, see [docs/NETWORK_CONFIG.md](docs/NETWORK_CONFIG.md).
 
 ## License
 
