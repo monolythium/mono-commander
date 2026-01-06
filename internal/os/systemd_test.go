@@ -39,6 +39,17 @@ func TestGenerateSystemdUnit(t *testing.T) {
 	if !strings.Contains(content, "NoNewPrivileges=true") {
 		t.Error("Missing security hardening")
 	}
+
+	// CRITICAL: Verify explicit --home flag in ExecStart
+	// Without this, monod uses default ~/.monod which may differ from monoctl join target
+	if !strings.Contains(content, "ExecStart=/usr/local/bin/monod start --home /home/monod/.monod") {
+		t.Errorf("ExecStart missing explicit --home flag, got content:\n%s", content)
+	}
+
+	// Verify WorkingDirectory matches Home
+	if !strings.Contains(content, "WorkingDirectory=/home/monod/.monod") {
+		t.Errorf("WorkingDirectory should match Home, got content:\n%s", content)
+	}
 }
 
 func TestGenerateSystemdUnit_Cosmovisor(t *testing.T) {
