@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -160,20 +161,22 @@ func GetMonitorKeysDir() (string, error) {
 }
 
 // LoadOrCreateKeys loads existing keys or creates new ones.
-func LoadOrCreateKeys(keysDir string) (*MonitorKeys, error) {
+// home is the monod home directory for reading node_key.json.
+func LoadOrCreateKeys(keysDir, home string) (*MonitorKeys, error) {
 	pubKeyPath := filepath.Join(keysDir, "monitor.pub")
 
 	// Check if keys exist
 	if _, err := os.Stat(pubKeyPath); err == nil {
-		return LoadKeys(keysDir)
+		return LoadKeys(keysDir, home)
 	}
 
 	// Create new keys
-	return CreateKeys(keysDir)
+	return CreateKeys(keysDir, home)
 }
 
 // CreateKeys generates a new ed25519 keypair and saves it.
-func CreateKeys(keysDir string) (*MonitorKeys, error) {
+// home is the monod home directory for reading node_key.json.
+func CreateKeys(keysDir, home string) (*MonitorKeys, error) {
 	if err := os.MkdirAll(keysDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create keys directory: %w", err)
 	}
@@ -197,7 +200,7 @@ func CreateKeys(keysDir string) (*MonitorKeys, error) {
 	}
 
 	// Get node ID from local node
-	nodeID, err := GetLocalNodeID()
+	nodeID, err := GetLocalNodeID(home)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node ID: %w", err)
 	}
@@ -210,7 +213,8 @@ func CreateKeys(keysDir string) (*MonitorKeys, error) {
 }
 
 // LoadKeys loads existing keys from disk.
-func LoadKeys(keysDir string) (*MonitorKeys, error) {
+// home is the monod home directory for reading node_key.json.
+func LoadKeys(keysDir, home string) (*MonitorKeys, error) {
 	pubKeyPath := filepath.Join(keysDir, "monitor.pub")
 	privKeyPath := filepath.Join(keysDir, "monitor.key")
 
@@ -234,7 +238,7 @@ func LoadKeys(keysDir string) (*MonitorKeys, error) {
 		return nil, fmt.Errorf("failed to decode private key: %w", err)
 	}
 
-	nodeID, err := GetLocalNodeID()
+	nodeID, err := GetLocalNodeID(home)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node ID: %w", err)
 	}
@@ -247,24 +251,28 @@ func LoadKeys(keysDir string) (*MonitorKeys, error) {
 }
 
 // GetLocalNodeID retrieves the node ID from the local node.
-func GetLocalNodeID() (string, error) {
-	// Try using monod tendermint show-node-id
-	cmd := exec.Command("monod", "tendermint", "show-node-id")
+// If home is empty, uses MONOD_HOME env var or defaults to ~/.monod.
+func GetLocalNodeID(home string) (string, error) {
+	// Determine home directory
+	if home == "" {
+		home = os.Getenv("MONOD_HOME")
+		if home == "" {
+			userHome, err := os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("could not determine home directory: %w", err)
+			}
+			home = filepath.Join(userHome, ".monod")
+		}
+	}
+
+	// Try using monod tendermint show-node-id with --home flag
+	cmd := exec.Command("monod", "tendermint", "show-node-id", "--home", home)
 	out, err := cmd.Output()
 	if err == nil {
 		return strings.TrimSpace(string(out)), nil
 	}
 
-	// Fallback: read from node_key.json
-	home := os.Getenv("MONOD_HOME")
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("could not determine home directory: %w", err)
-		}
-		home = filepath.Join(userHome, ".monod")
-	}
-
+	// Fallback: read from node_key.json and derive node ID
 	nodeKeyPath := filepath.Join(home, "config", "node_key.json")
 	data, err := os.ReadFile(nodeKeyPath)
 	if err != nil {
@@ -273,6 +281,7 @@ func GetLocalNodeID() (string, error) {
 
 	var nodeKey struct {
 		PrivKey struct {
+			Type  string `json:"type"`
 			Value string `json:"value"`
 		} `json:"priv_key"`
 	}
@@ -280,9 +289,23 @@ func GetLocalNodeID() (string, error) {
 		return "", fmt.Errorf("failed to parse node_key.json: %w", err)
 	}
 
-	// Derive node ID from private key (first 20 bytes of SHA256 of pubkey)
-	// For simplicity, we'll just use the tendermint command result
-	return "", fmt.Errorf("could not determine node ID")
+	// Decode private key and derive node ID
+	privKeyBytes, err := base64.StdEncoding.DecodeString(nodeKey.PrivKey.Value)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode private key: %w", err)
+	}
+
+	// For ed25519, public key is last 32 bytes of 64-byte private key
+	if len(privKeyBytes) != 64 {
+		return "", fmt.Errorf("unexpected private key length: %d", len(privKeyBytes))
+	}
+	pubKey := privKeyBytes[32:]
+
+	// Node ID is first 20 bytes of SHA256 of public key, hex encoded
+	hash := sha256.Sum256(pubKey)
+	nodeID := hex.EncodeToString(hash[:20])
+
+	return nodeID, nil
 }
 
 // GetLocalStatus retrieves the current node status.

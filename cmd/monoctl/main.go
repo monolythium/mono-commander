@@ -1047,6 +1047,7 @@ func init() {
 	monitorRegisterCmd.Flags().String("moniker", "", "Node moniker/name")
 	monitorRegisterCmd.Flags().String("role", "fullnode", "Node role (validator, seed, bootstrap, fullnode, gateway, snapshot)")
 	monitorRegisterCmd.Flags().String("api", "", "Node-monitor API endpoint (default: https://nodemon.mononodes.xyz)")
+	monitorRegisterCmd.Flags().String("home", "", "Node home directory (default: ~/.monod)")
 	monitorRegisterCmd.MarkFlagRequired("network")
 	monitorRegisterCmd.MarkFlagRequired("moniker")
 	monitorCmd.AddCommand(monitorRegisterCmd)
@@ -4162,6 +4163,7 @@ func runMonitorRegister(cmd *cobra.Command, args []string) {
 	moniker, _ := cmd.Flags().GetString("moniker")
 	role, _ := cmd.Flags().GetString("role")
 	apiEndpoint, _ := cmd.Flags().GetString("api")
+	home, _ := cmd.Flags().GetString("home")
 
 	if apiEndpoint == "" {
 		apiEndpoint = core.MonitorAPIEndpointForNetwork(networkStr)
@@ -4177,7 +4179,7 @@ func runMonitorRegister(cmd *cobra.Command, args []string) {
 
 	// Load or create keys
 	fmt.Println("Loading or creating monitor keypair...")
-	keys, err := core.LoadOrCreateKeys(keysDir)
+	keys, err := core.LoadOrCreateKeys(keysDir, home)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading/creating keys: %v\n", err)
 		os.Exit(1)
@@ -4247,7 +4249,7 @@ func runMonitorHeartbeat(cmd *cobra.Command, args []string) {
 	}
 
 	// Load keys
-	keys, err := core.LoadKeys(keysDir)
+	keys, err := core.LoadKeys(keysDir, home)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading keys: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Have you registered? Run: monoctl monitor register --network %s --moniker <name>\n", networkStr)
