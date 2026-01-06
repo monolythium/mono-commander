@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/monolythium/mono-commander/internal/net"
 )
 
 // SyncStrategy defines how the node should sync.
@@ -562,6 +564,35 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 		} else {
 			result.Steps[len(result.Steps)-1].Status = "success"
 			result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("evm-chain-id = %d", network.EVMChainID)
+		}
+	}
+
+	// Step 12: Detect and set external_address (CRITICAL for validators)
+	// Without external_address, other validators cannot connect to receive block proposals,
+	// causing the node to sign but never propose blocks.
+	logger.Info("detecting public IP for external_address")
+	result.Steps = append(result.Steps, JoinStep{Name: "Set external address", Status: "pending"})
+
+	publicIP := net.DetectPublicIP()
+	if publicIP == "" {
+		result.Steps[len(result.Steps)-1].Status = "skipped"
+		result.Steps[len(result.Steps)-1].Message = "could not detect public IP - set external_address manually if running as validator"
+		logger.Warn("could not detect public IP, external_address not set")
+	} else {
+		externalAddr := fmt.Sprintf("tcp://%s:26656", publicIP)
+		if err := SetExternalAddress(opts.Home, externalAddr, opts.DryRun); err != nil {
+			result.Steps[len(result.Steps)-1].Status = "failed"
+			result.Steps[len(result.Steps)-1].Message = err.Error()
+			// Non-fatal: log warning and continue
+			logger.Warn("failed to set external_address", "error", err)
+		} else {
+			if opts.DryRun {
+				result.Steps[len(result.Steps)-1].Status = "success"
+				result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("(dry-run) %s", externalAddr)
+			} else {
+				result.Steps[len(result.Steps)-1].Status = "success"
+				result.Steps[len(result.Steps)-1].Message = externalAddr
+			}
 		}
 	}
 

@@ -372,3 +372,68 @@ func ClearAddrbook(home string, dryRun bool) error {
 
 	return nil
 }
+
+// SetExternalAddress sets the external_address in config.toml [p2p] section.
+// This is CRITICAL for validators - without it, other validators cannot connect
+// to receive block proposals, causing the node to sign but never propose blocks.
+func SetExternalAddress(home string, externalAddr string, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+
+	configPath := filepath.Join(home, "config", "config.toml")
+
+	// Check if file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return fmt.Errorf("config.toml not found at %s - run 'monod init' first", configPath)
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config.toml: %w", err)
+	}
+
+	// Use line-by-line parsing to preserve comments and formatting
+	lines := strings.Split(string(data), "\n")
+	var result []string
+	inP2PSection := false
+	externalAddrReplaced := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Track which section we're in
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inP2PSection = trimmed == "[p2p]"
+		}
+
+		// Replace external_address in [p2p] section only
+		if inP2PSection && isConfigKey(trimmed, "external_address") {
+			leadingWS := getLeadingWhitespace(line)
+			result = append(result, fmt.Sprintf(`%sexternal_address = "%s"`, leadingWS, externalAddr))
+			externalAddrReplaced = true
+			continue
+		}
+
+		result = append(result, line)
+	}
+
+	if !externalAddrReplaced {
+		return fmt.Errorf("could not find 'external_address' key in [p2p] section of config.toml")
+	}
+
+	// Write back
+	output := strings.Join(result, "\n")
+	if err := os.WriteFile(configPath, []byte(output), 0644); err != nil {
+		return fmt.Errorf("failed to write config.toml: %w", err)
+	}
+
+	return nil
+}
+
+// GetExternalAddress reads the current external_address from config.toml.
+func GetExternalAddress(home string) (string, error) {
+	configPath := filepath.Join(home, "config", "config.toml")
+	return GetConfigValue(configPath, "p2p", "external_address")
+}
