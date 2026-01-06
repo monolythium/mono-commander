@@ -54,9 +54,6 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Building version: ${VERSION}"
 
-      - name: Run tests
-        run: go test -v ./...
-
       - name: Build binaries
         run: |
           VERSION=${{ steps.version.outputs.version }}

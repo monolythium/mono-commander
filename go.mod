@@ -1,6 +1,6 @@
 module github.com/monolythium/mono-commander
 
-go 1.24.0
+go 1.22.0
 
 require (
 	github.com/charmbracelet/bubbles v0.20.0
