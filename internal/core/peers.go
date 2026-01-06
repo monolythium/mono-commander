@@ -268,6 +268,19 @@ func PeersToString(peers []Peer) string {
 	return strings.Join(strs, ",")
 }
 
+// PeersToStringSlice converts a list of peers to a string slice.
+// This is useful for drift detection where we need individual peer strings.
+func PeersToStringSlice(peers []Peer) []string {
+	if len(peers) == 0 {
+		return []string{}
+	}
+	strs := make([]string, len(peers))
+	for i, p := range peers {
+		strs[i] = p.String()
+	}
+	return strs
+}
+
 // MergePeers merges two peer lists, deduplicating by node ID.
 func MergePeers(a, b []Peer) []Peer {
 	seen := make(map[string]bool)
