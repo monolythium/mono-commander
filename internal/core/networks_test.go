@@ -176,7 +176,8 @@ func TestSeedString(t *testing.T) {
 }
 
 func TestDefaultPeersURLSelection(t *testing.T) {
-	// Verify that each public network has a default PeersURL pointing to mono-core-peers
+	// Verify that each public network has a default PeersURL
+	// Sprintnet uses monolythium/networks, others still use mono-core-peers
 	tests := []struct {
 		network     NetworkName
 		wantBaseURL string
@@ -184,7 +185,7 @@ func TestDefaultPeersURLSelection(t *testing.T) {
 	}{
 		{
 			network:     NetworkSprintnet,
-			wantBaseURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/sprintnet/peers.json",
+			wantBaseURL: "https://raw.githubusercontent.com/monolythium/networks/main/networks/sprintnet.json",
 			wantEmpty:   false,
 		},
 		{

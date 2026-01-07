@@ -50,8 +50,8 @@ var networks = map[NetworkName]Network{
 			"seed2.sprintnet.mononodes.xyz",
 			"seed3.sprintnet.mononodes.xyz",
 		},
-		GenesisURL: "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/sprintnet/genesis.json",
-		PeersURL:   "https://raw.githubusercontent.com/monolythium/mono-core-peers/prod/networks/sprintnet/peers.json",
+		GenesisURL: "https://raw.githubusercontent.com/monolythium/networks/main/sprintnet/genesis.json",
+		PeersURL:   "https://raw.githubusercontent.com/monolythium/networks/main/networks/sprintnet.json",
 	},
 	NetworkTestnet: {
 		Name:       NetworkTestnet,

@@ -122,6 +122,29 @@ func isValidIP(s string) bool {
 	return hasDots || hasColons
 }
 
+// IsIPv6 checks if an IP address string is an IPv6 address.
+// Returns true if the address contains colons (IPv6 format).
+func IsIPv6(ip string) bool {
+	for _, c := range ip {
+		if c == ':' {
+			return true
+		}
+	}
+	return false
+}
+
+// FormatExternalAddress formats an IP address and port for use as external_address.
+// IPv6 addresses are wrapped in brackets as required by the URI format.
+// Examples:
+//   - IPv4: FormatExternalAddress("1.2.3.4", 26656) returns "tcp://1.2.3.4:26656"
+//   - IPv6: FormatExternalAddress("2001:db8::1", 26656) returns "tcp://[2001:db8::1]:26656"
+func FormatExternalAddress(ip string, port int) string {
+	if IsIPv6(ip) {
+		return fmt.Sprintf("tcp://[%s]:%d", ip, port)
+	}
+	return fmt.Sprintf("tcp://%s:%d", ip, port)
+}
+
 // IsPublicIP checks if an IP address is a public (routable) IP.
 // Returns false for localhost, private ranges, and link-local addresses.
 func IsPublicIP(ip string) bool {
