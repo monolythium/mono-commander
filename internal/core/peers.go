@@ -16,9 +16,11 @@ type Peer struct {
 }
 
 // peersRegistryRaw is used for initial JSON parsing with flexible peer formats.
+// Supports both mono-core-peers format and monolythium/networks format.
 type peersRegistryRaw struct {
 	NetworkName         string            `json:"network_name"`
 	ChainID             string            `json:"chain_id"`
+	CosmosChainID       string            `json:"cosmos_chain_id"` // monolythium/networks format
 	EVMChainID          uint64            `json:"evm_chain_id"`
 	GenesisSHA          string            `json:"genesis_sha256"`
 	GenesisURL          string            `json:"genesis_url"`
@@ -147,8 +149,13 @@ func ParsePeersRegistry(data []byte) (*PeersRegistry, error) {
 		return nil, fmt.Errorf("failed to parse peers.json: %w", err)
 	}
 
-	if raw.ChainID == "" {
-		return nil, fmt.Errorf("peers.json missing chain_id")
+	// Support both chain_id (mono-core-peers) and cosmos_chain_id (monolythium/networks)
+	chainID := raw.ChainID
+	if chainID == "" {
+		chainID = raw.CosmosChainID
+	}
+	if chainID == "" {
+		return nil, fmt.Errorf("peers.json missing chain_id or cosmos_chain_id")
 	}
 
 	seeds, err := parsePeerArray(raw.Seeds, "seeds")
@@ -198,7 +205,7 @@ func ParsePeersRegistry(data []byte) (*PeersRegistry, error) {
 
 	return &PeersRegistry{
 		NetworkName:         raw.NetworkName,
-		ChainID:             raw.ChainID,
+		ChainID:             chainID,
 		EVMChainID:          raw.EVMChainID,
 		GenesisSHA:          raw.GenesisSHA,
 		GenesisURL:          raw.GenesisURL,

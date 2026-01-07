@@ -579,7 +579,7 @@ func Join(opts JoinOptions, fetcher Fetcher) (*JoinResult, error) {
 		result.Steps[len(result.Steps)-1].Message = "could not detect public IP - set external_address manually if running as validator"
 		logger.Warn("could not detect public IP, external_address not set")
 	} else {
-		externalAddr := fmt.Sprintf("tcp://%s:26656", publicIP)
+		externalAddr := net.FormatExternalAddress(publicIP, 26656)
 		if err := SetExternalAddress(opts.Home, externalAddr, opts.DryRun); err != nil {
 			result.Steps[len(result.Steps)-1].Status = "failed"
 			result.Steps[len(result.Steps)-1].Message = err.Error()
