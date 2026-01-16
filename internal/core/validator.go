@@ -377,6 +377,41 @@ func executeOrSkip(ctx context.Context, opts ValidatorActionOptions, result *Val
 	return result, nil
 }
 
+// BankSendAction executes or previews a bank send transaction
+func BankSendAction(ctx context.Context, opts ValidatorActionOptions, params BankSendParams) (*ValidatorActionResult, error) {
+	result := &ValidatorActionResult{
+		Action: TxActionSend,
+		Steps:  make([]ActionStep, 0),
+	}
+
+	// Step 1: Validate network
+	result.Steps = append(result.Steps, ActionStep{Name: "Validate network", Status: "pending"})
+	_, err := GetNetwork(opts.Network)
+	if err != nil {
+		result.Steps[len(result.Steps)-1].Status = "failed"
+		result.Steps[len(result.Steps)-1].Message = err.Error()
+		result.Error = err
+		return result, err
+	}
+	result.Steps[len(result.Steps)-1].Status = "success"
+
+	// Step 2: Build transaction command
+	result.Steps = append(result.Steps, ActionStep{Name: "Build transaction", Status: "pending"})
+	txOpts := opts.toTxBuilderOptions()
+	cmd, err := BuildBankSendTx(txOpts, params)
+	if err != nil {
+		result.Steps[len(result.Steps)-1].Status = "failed"
+		result.Steps[len(result.Steps)-1].Message = err.Error()
+		result.Error = err
+		return result, err
+	}
+	result.Command = cmd
+	result.Description = cmd.Description
+	result.Steps[len(result.Steps)-1].Status = "success"
+
+	return executeOrSkip(ctx, opts, result)
+}
+
 // CheckRPCBeforeAction validates RPC connectivity before an action
 func CheckRPCBeforeAction(opts ValidatorActionOptions) (*RPCCheckResult, error) {
 	network, err := GetNetwork(opts.Network)

@@ -222,6 +222,32 @@ Examples:
 		Run:   runStakeRedelegate,
 	}
 
+	// M4: Bank command group
+	bankCmd = &cobra.Command{
+		Use:   "bank",
+		Short: "Bank operations (send tokens)",
+	}
+
+	bankSendCmd = &cobra.Command{
+		Use:   "send",
+		Short: "Send tokens to another address",
+		Long: `Send tokens to another address.
+
+Amount can be specified in two ways:
+  --amount-lyth 210000    (user-friendly: 210,000 LYTH)
+  --amount 210000000000000000000000alyth  (raw alyth)
+
+Only one of --amount or --amount-lyth should be provided.
+
+Examples:
+  # Dry-run (default): show the monod command without executing
+  monoctl bank send --network sprintnet --from operator4 --to mono1abc... --amount-lyth 210000
+
+  # Execute the transaction
+  monoctl bank send --network sprintnet --from operator4 --to mono1abc... --amount-lyth 210000 --execute`,
+		Run: runBankSend,
+	}
+
 	// M4: Rewards command group
 	rewardsCmd = &cobra.Command{
 		Use:   "rewards",
@@ -907,6 +933,15 @@ func init() {
 	stakeRedelegateCmd.MarkFlagRequired("amount")
 	stakeCmd.AddCommand(stakeRedelegateCmd)
 	rootCmd.AddCommand(stakeCmd)
+
+	// M4: Bank send command
+	addTxFlags(bankSendCmd)
+	bankSendCmd.Flags().String("to", "", "Recipient address (mono1...)")
+	bankSendCmd.Flags().String("amount", "", "Amount in alyth (e.g., 210000000000000000000000alyth)")
+	bankSendCmd.Flags().Int64("amount-lyth", 0, "Amount in LYTH (user-friendly, e.g., 210000 for 210K LYTH)")
+	bankSendCmd.MarkFlagRequired("to")
+	bankCmd.AddCommand(bankSendCmd)
+	rootCmd.AddCommand(bankCmd)
 
 	// M4: Rewards withdraw command
 	addTxFlags(rewardsWithdrawCmd)
@@ -1881,6 +1916,57 @@ func runStakeRedelegate(cmd *cobra.Command, args []string) {
 	if err != nil && result == nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	printActionResult(result)
+
+	if result != nil && !result.Success {
+		os.Exit(1)
+	}
+}
+
+func runBankSend(cmd *cobra.Command, args []string) {
+	opts := getTxOptions(cmd)
+
+	toAddr, _ := cmd.Flags().GetString("to")
+	amountRaw, _ := cmd.Flags().GetString("amount")
+	amountLYTH, _ := cmd.Flags().GetInt64("amount-lyth")
+
+	// Validate: exactly one of --amount or --amount-lyth must be provided
+	if amountRaw == "" && amountLYTH == 0 {
+		fmt.Fprintf(os.Stderr, "Error: either --amount or --amount-lyth is required\n")
+		os.Exit(1)
+	}
+	if amountRaw != "" && amountLYTH > 0 {
+		fmt.Fprintf(os.Stderr, "Error: cannot specify both --amount and --amount-lyth\n")
+		os.Exit(1)
+	}
+
+	// Convert --amount-lyth to alyth string
+	var amount string
+	if amountLYTH > 0 {
+		amount = core.LYTHToAlyth(amountLYTH)
+	} else {
+		amount = amountRaw
+	}
+
+	params := core.BankSendParams{
+		ToAddress: toAddr,
+		Amount:    amount,
+	}
+
+	ctx := context.Background()
+	result, err := core.BankSendAction(ctx, opts, params)
+	if err != nil && result == nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// For dry-run, print the exact monod command
+	if result != nil && result.Command != nil && !result.Executed {
+		fmt.Println("\n=== DRY-RUN: Command to execute ===")
+		fmt.Printf("%s\n", result.Command.String())
+		fmt.Println("\nTo execute, add --execute flag")
 	}
 
 	printActionResult(result)

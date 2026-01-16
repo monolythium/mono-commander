@@ -64,6 +64,7 @@ const (
 	TxActionWithdrawRewards TxAction = "withdraw-rewards"
 	TxActionWithdrawComm    TxAction = "withdraw-commission"
 	TxActionVote            TxAction = "vote"
+	TxActionSend            TxAction = "send"
 )
 
 // VoteOption represents a governance vote option
@@ -622,5 +623,36 @@ func BuildVoteTx(opts TxBuilderOptions, params VoteParams) (*TxCommand, error) {
 		Binary:      "monod",
 		Args:        args,
 		Description: fmt.Sprintf("Vote %s on proposal #%s", params.Option, params.ProposalID),
+	}, nil
+}
+
+// BankSendParams contains parameters for bank send
+type BankSendParams struct {
+	ToAddress string // mono1... recipient address
+	Amount    string // in alyth (e.g., "210000000000000000000000alyth" for 210K LYTH)
+}
+
+// BuildBankSendTx builds a bank send transaction command
+func BuildBankSendTx(opts TxBuilderOptions, params BankSendParams) (*TxCommand, error) {
+	if err := ValidateAddress(params.ToAddress); err != nil {
+		return nil, fmt.Errorf("recipient address: %w", err)
+	}
+	if err := ValidateAmount(params.Amount); err != nil {
+		return nil, err
+	}
+
+	network, err := GetNetwork(opts.Network)
+	if err != nil {
+		return nil, err
+	}
+
+	args := []string{"tx", "bank", "send", opts.From, params.ToAddress, params.Amount}
+	args = append(args, buildCommonArgs(opts, network)...)
+
+	return &TxCommand{
+		Action:      TxActionSend,
+		Binary:      "monod",
+		Args:        args,
+		Description: fmt.Sprintf("Send %s to %s", FormatLYTH(mustParseAmount(params.Amount)), params.ToAddress),
 	}, nil
 }
