@@ -106,16 +106,17 @@ func (c *TxCommand) String() string {
 
 // TxBuilderOptions contains common options for all tx builders
 type TxBuilderOptions struct {
-	Network   NetworkName
-	Home      string
-	From      string // key name or address
-	Fees      string // amount in alyth (e.g., "10000alyth")
-	GasPrices string // price in alyth (e.g., "0.025alyth")
-	Gas       string // gas limit or "auto"
-	Node      string // RPC node URL
-	ChainID   string // chain-id override (uses network default if empty)
-	Broadcast bool   // whether to broadcast (default: false for dry-run)
-	DryRun    bool   // dry-run mode (default: true)
+	Network        NetworkName
+	Home           string
+	From           string // key name or address
+	Fees           string // amount in alyth (e.g., "10000alyth")
+	GasPrices      string // price in alyth (e.g., "0.025alyth")
+	Gas            string // gas limit or "auto"
+	Node           string // RPC node URL
+	ChainID        string // chain-id override (uses network default if empty)
+	KeyringBackend string // keyring backend (os, file, test, memory)
+	Broadcast      bool   // whether to broadcast (default: false for dry-run)
+	DryRun         bool   // dry-run mode (default: true)
 }
 
 // ValidateAddress validates a Monolythium account address (mono1...)
@@ -292,6 +293,11 @@ func buildCommonArgs(opts TxBuilderOptions, network Network) []string {
 	// Node RPC
 	if opts.Node != "" {
 		args = append(args, "--node", opts.Node)
+	}
+
+	// Keyring backend
+	if opts.KeyringBackend != "" {
+		args = append(args, "--keyring-backend", opts.KeyringBackend)
 	}
 
 	// Broadcast mode

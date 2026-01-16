@@ -11,17 +11,18 @@ import (
 
 // ValidatorActionOptions contains common options for validator actions
 type ValidatorActionOptions struct {
-	Network   NetworkName
-	Home      string
-	From      string // key name or address
-	Fees      string // amount in alyth
-	GasPrices string // price in alyth
-	Gas       string // gas limit or "auto"
-	Node      string // RPC node URL
-	ChainID   string // chain-id override
-	DryRun    bool   // default true: only show command
-	Execute   bool   // if true and DryRun false, execute the command
-	Logger    *slog.Logger
+	Network        NetworkName
+	Home           string
+	From           string // key name or address
+	Fees           string // amount in alyth
+	GasPrices      string // price in alyth
+	Gas            string // gas limit or "auto"
+	Node           string // RPC node URL
+	ChainID        string // chain-id override
+	KeyringBackend string // keyring backend (os, file, test, memory)
+	DryRun         bool   // default true: only show command
+	Execute        bool   // if true and DryRun false, execute the command
+	Logger         *slog.Logger
 }
 
 // ValidatorActionResult contains the result of a validator action
@@ -52,16 +53,17 @@ func (o ValidatorActionOptions) toTxBuilderOptions() TxBuilderOptions {
 	shouldBroadcast := o.Execute
 
 	return TxBuilderOptions{
-		Network:   o.Network,
-		Home:      o.Home,
-		From:      o.From,
-		Fees:      o.Fees,
-		GasPrices: o.GasPrices,
-		Gas:       o.Gas,
-		Node:      o.Node,
-		ChainID:   o.ChainID,
-		Broadcast: shouldBroadcast,
-		DryRun:    effectiveDryRun,
+		Network:        o.Network,
+		Home:           o.Home,
+		From:           o.From,
+		Fees:           o.Fees,
+		GasPrices:      o.GasPrices,
+		Gas:            o.Gas,
+		Node:           o.Node,
+		ChainID:        o.ChainID,
+		KeyringBackend: o.KeyringBackend,
+		Broadcast:      shouldBroadcast,
+		DryRun:         effectiveDryRun,
 	}
 }
 

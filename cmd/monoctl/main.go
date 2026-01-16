@@ -35,16 +35,17 @@ import (
 // Common flag variables for M4 commands
 var (
 	// Shared tx flags
-	txNetwork   string
-	txHome      string
-	txFrom      string
-	txFees      string
-	txGasPrices string
-	txGas       string
-	txNode      string
-	txChainID   string
-	txDryRun    bool
-	txExecute   bool
+	txNetwork        string
+	txHome           string
+	txFrom           string
+	txFees           string
+	txGasPrices      string
+	txGas            string
+	txNode           string
+	txChainID        string
+	txKeyringBackend string
+	txDryRun         bool
+	txExecute        bool
 )
 
 var (
@@ -1159,6 +1160,7 @@ func addTxFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&txGas, "gas", "auto", "Gas limit or 'auto'")
 	cmd.Flags().StringVar(&txNode, "node", "", "RPC node URL (default: localhost:26657)")
 	cmd.Flags().StringVar(&txChainID, "chain-id", "", "Chain ID override (uses network default if empty)")
+	cmd.Flags().StringVar(&txKeyringBackend, "keyring-backend", "", "Keyring backend (os|file|test|memory)")
 	cmd.Flags().BoolVar(&txDryRun, "dry-run", true, "Only show command, do not execute")
 	cmd.Flags().BoolVar(&txExecute, "execute", false, "Execute the transaction (overrides dry-run)")
 	cmd.MarkFlagRequired("from")
@@ -1706,6 +1708,7 @@ func getTxOptions(cmd *cobra.Command) core.ValidatorActionOptions {
 	gas, _ := cmd.Flags().GetString("gas")
 	node, _ := cmd.Flags().GetString("node")
 	chainID, _ := cmd.Flags().GetString("chain-id")
+	keyringBackend, _ := cmd.Flags().GetString("keyring-backend")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	execute, _ := cmd.Flags().GetBool("execute")
 
@@ -1725,17 +1728,18 @@ func getTxOptions(cmd *cobra.Command) core.ValidatorActionOptions {
 	}
 
 	return core.ValidatorActionOptions{
-		Network:   network,
-		Home:      home,
-		From:      from,
-		Fees:      fees,
-		GasPrices: gasPrices,
-		Gas:       gas,
-		Node:      node,
-		ChainID:   chainID,
-		DryRun:    dryRun && !execute, // execute overrides dry-run
-		Execute:   execute,
-		Logger:    logger,
+		Network:        network,
+		Home:           home,
+		From:           from,
+		Fees:           fees,
+		GasPrices:      gasPrices,
+		Gas:            gas,
+		Node:           node,
+		ChainID:        chainID,
+		KeyringBackend: keyringBackend,
+		DryRun:         dryRun && !execute, // execute overrides dry-run
+		Execute:        execute,
+		Logger:         logger,
 	}
 }
 
