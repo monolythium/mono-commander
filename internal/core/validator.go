@@ -120,20 +120,34 @@ func CreateValidatorAction(ctx context.Context, opts ValidatorActionOptions, par
 
 	// Step 4: Execute transaction
 	result.Steps = append(result.Steps, ActionStep{Name: "Execute transaction", Status: "pending"})
-	runner := oshelpers.NewRunner(false)
 
-	// For multi-msg transactions, we need special handling
-	if cmd.RequiresMultiMsg {
-		result.Steps[len(result.Steps)-1].Status = "failed"
-		result.Steps[len(result.Steps)-1].Message = "multi-message transaction requires manual composition"
-		result.Warnings = append(result.Warnings,
-			"Create-validator requires both MsgCreateValidator and MsgBurn in one tx.",
-			"Run the commands below to generate unsigned JSON, then combine and sign:",
-		)
-		result.Error = fmt.Errorf("multi-message tx not yet automated; use generated commands manually")
-		return result, result.Error
+	// For multi-msg transactions, use MultiMsgExecutor
+	if cmd.RequiresMultiMsg && len(cmd.MultiMsgCommands) > 0 {
+		// Create multi-message executor
+		executor := NewMultiMsgExecutor(txOpts, network)
+
+		// Execute multi-message transaction
+		summary, err := executor.ExecuteMultiMsg(ctx, cmd.MultiMsgCommands)
+		result.Executed = true
+
+		if err != nil {
+			result.Steps[len(result.Steps)-1].Status = "failed"
+			result.Steps[len(result.Steps)-1].Message = err.Error()
+			result.Error = err
+			return result, err
+		}
+
+		result.TxHash = summary.TxHash
+		result.Height = summary.Height
+		result.Success = summary.Success
+		result.Steps[len(result.Steps)-1].Status = "success"
+		result.Steps[len(result.Steps)-1].Message = fmt.Sprintf("txhash: %s", summary.TxHash)
+
+		return result, nil
 	}
 
+	// Single message transaction - use regular execution
+	runner := oshelpers.NewRunner(false)
 	execResult := runner.RunTx(ctx, cmd.Binary, cmd.Args)
 	result.Executed = true
 

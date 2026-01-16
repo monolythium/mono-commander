@@ -196,7 +196,33 @@ Examples:
 	validatorCreateCmd = &cobra.Command{
 		Use:   "create",
 		Short: "Create a new validator (includes required 100k LYTH burn)",
-		Run:   runValidatorCreate,
+		Long: `Create a new validator with the required 100k LYTH burn deposit.
+
+Per the Monolythium blueprint, validator creation requires burning 100,000 LYTH
+as a non-refundable deposit. This command automatically includes the MsgBurn
+in the same transaction as MsgCreateValidator.
+
+Amount flags (use one format for each):
+  --self-bond-lyth 100000              User-friendly: 100,000 LYTH
+  --amount 100000000000000000000000alyth  Raw alyth format
+
+  --min-self-delegation-lyth 100000    User-friendly: 100,000 LYTH
+  --min-self-delegation 100000000000000000000000alyth  Raw alyth format
+
+Examples:
+  # Dry-run (default): preview the multi-message transaction
+  monoctl validator create --network sprintnet --from mykey \
+    --moniker "My Validator" \
+    --self-bond-lyth 100000 \
+    --min-self-delegation-lyth 100000
+
+  # Execute the transaction
+  monoctl validator create --network sprintnet --from mykey \
+    --moniker "My Validator" \
+    --self-bond-lyth 100000 \
+    --min-self-delegation-lyth 100000 \
+    --execute`,
+		Run: runValidatorCreate,
 	}
 
 	// M4: Stake command group
@@ -899,12 +925,13 @@ func init() {
 	validatorCreateCmd.Flags().String("commission-rate", "0.10", "Commission rate (e.g., 0.10 for 10%)")
 	validatorCreateCmd.Flags().String("commission-max-rate", "0.20", "Maximum commission rate")
 	validatorCreateCmd.Flags().String("commission-max-change-rate", "0.01", "Maximum daily commission change")
-	validatorCreateCmd.Flags().String("min-self-delegation", "", "Minimum self-delegation in alyth (required, min 100000 LYTH)")
-	validatorCreateCmd.Flags().String("amount", "", "Self-bond amount in alyth (required, min 100000 LYTH)")
+	validatorCreateCmd.Flags().String("min-self-delegation", "", "Minimum self-delegation in alyth (min 100000 LYTH)")
+	validatorCreateCmd.Flags().Int64("min-self-delegation-lyth", 0, "Minimum self-delegation in LYTH (min 100000)")
+	validatorCreateCmd.Flags().String("amount", "", "Self-bond amount in alyth (min 100000 LYTH)")
+	validatorCreateCmd.Flags().Int64("self-bond-lyth", 0, "Self-bond amount in LYTH (min 100000, user-friendly)")
 	validatorCreateCmd.Flags().String("pubkey", "", "Path to consensus pubkey file (optional)")
 	validatorCreateCmd.MarkFlagRequired("moniker")
-	validatorCreateCmd.MarkFlagRequired("amount")
-	validatorCreateCmd.MarkFlagRequired("min-self-delegation")
+	// Note: either amount or self-bond-lyth is required (validated in runValidatorCreate)
 	validatorCmd.AddCommand(validatorCreateCmd)
 	rootCmd.AddCommand(validatorCmd)
 
@@ -1821,8 +1848,37 @@ func runValidatorCreate(cmd *cobra.Command, args []string) {
 	commissionMaxRate, _ := cmd.Flags().GetString("commission-max-rate")
 	commissionMaxChange, _ := cmd.Flags().GetString("commission-max-change-rate")
 	minSelfDelegation, _ := cmd.Flags().GetString("min-self-delegation")
+	minSelfDelegationLYTH, _ := cmd.Flags().GetInt64("min-self-delegation-lyth")
 	amount, _ := cmd.Flags().GetString("amount")
+	selfBondLYTH, _ := cmd.Flags().GetInt64("self-bond-lyth")
 	pubkeyPath, _ := cmd.Flags().GetString("pubkey")
+
+	// Handle LYTH-denominated flags
+	if selfBondLYTH > 0 {
+		if amount != "" {
+			fmt.Fprintf(os.Stderr, "Error: cannot specify both --amount and --self-bond-lyth\n")
+			os.Exit(1)
+		}
+		amount = core.LYTHToAlyth(selfBondLYTH)
+	}
+
+	if minSelfDelegationLYTH > 0 {
+		if minSelfDelegation != "" {
+			fmt.Fprintf(os.Stderr, "Error: cannot specify both --min-self-delegation and --min-self-delegation-lyth\n")
+			os.Exit(1)
+		}
+		minSelfDelegation = core.LYTHToAlyth(minSelfDelegationLYTH)
+	}
+
+	// Validate required amounts
+	if amount == "" {
+		fmt.Fprintf(os.Stderr, "Error: either --amount or --self-bond-lyth is required\n")
+		os.Exit(1)
+	}
+	if minSelfDelegation == "" {
+		fmt.Fprintf(os.Stderr, "Error: either --min-self-delegation or --min-self-delegation-lyth is required\n")
+		os.Exit(1)
+	}
 
 	params := core.CreateValidatorParams{
 		Moniker:             moniker,

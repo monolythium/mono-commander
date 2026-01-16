@@ -358,6 +358,22 @@ func BuildCreateValidatorTx(opts TxBuilderOptions, params CreateValidatorParams)
 		return nil, err
 	}
 
+	// For multi-message transactions, sub-commands must always use --generate-only
+	// Create a copy of opts that forces generate-only mode for sub-commands
+	generateOnlyOpts := TxBuilderOptions{
+		Network:        opts.Network,
+		Home:           opts.Home,
+		From:           opts.From,
+		Fees:           opts.Fees,
+		GasPrices:      opts.GasPrices,
+		Gas:            opts.Gas,
+		Node:           opts.Node,
+		ChainID:        opts.ChainID,
+		KeyringBackend: opts.KeyringBackend,
+		Broadcast:      false, // Always generate-only for sub-commands
+		DryRun:         true,  // Force generate-only mode
+	}
+
 	// Build the create-validator message args
 	createValArgs := []string{"tx", "staking", "create-validator"}
 	createValArgs = append(createValArgs, "--moniker", params.Moniker)
@@ -387,12 +403,12 @@ func BuildCreateValidatorTx(opts TxBuilderOptions, params CreateValidatorParams)
 	}
 	// If PubKeyAuto is true, monod will derive from keyring (default behavior)
 
-	// Add common args
-	createValArgs = append(createValArgs, buildCommonArgs(opts, network)...)
+	// Add common args with generate-only forced
+	createValArgs = append(createValArgs, buildCommonArgs(generateOnlyOpts, network)...)
 
 	// Build the burn message for 100k LYTH
 	burnArgs := []string{"tx", "bank", "burn", ValidatorBurnAlyth.String() + BaseDenom}
-	burnArgs = append(burnArgs, buildCommonArgs(opts, network)...)
+	burnArgs = append(burnArgs, buildCommonArgs(generateOnlyOpts, network)...)
 
 	// Create the compound command
 	cmd := &TxCommand{
